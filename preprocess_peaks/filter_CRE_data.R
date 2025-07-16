@@ -9,7 +9,6 @@ suppressPackageStartupMessages({
 option_list <- list(
   make_option(c("-c", "--cre_file"), type = "character", help = "Input BED file with CRE data", metavar = "FILE"),
   make_option(c("-m", "--metadata"), type = "character", help = "Metadata CSV with SRA to context mapping", metavar = "FILE"),
-  make_option(c("-H", "--headers"), type = "character", help = "Text file with signal track headers", metavar = "FILE"),
   make_option(c("-o", "--output"), type = "character", default = "dataset_1kb.bed", help = "Output BED file [default: %default]"),
   make_option(c("-r", "--ratio"), type = "double", default = 6, help = "Negative:positive downsampling ratio [default: %default]")
 )
@@ -19,15 +18,14 @@ opt_parser <- OptionParser(option_list = option_list)
 opt <- parse_args(opt_parser)
 
 # --- Check required inputs ---
-if (is.null(opt$cre_file) || is.null(opt$metadata) || is.null(opt$headers)) {
+if (is.null(opt$cre_file) || is.null(opt$metadata)) {
   print_help(opt_parser)
-  stop("Error: --cre_file, --metadata, and --headers are required.", call. = FALSE)
+  stop("Error: --cre_file, and --metadata are required.", call. = FALSE)
 }
 
 # --- Read and map header names ---
-header_ids <- read.delim(opt$headers, header = FALSE)$V1
 metadata_df <- read.csv(opt$metadata, header = TRUE)
-context_names <- metadata_df[match(header_ids, metadata_df$SRA.ID), "context"]
+context_names <- metadata_df$context
 col_names <- c("chr", "start", "end", "name", context_names)
 
 # --- Read CRE data ---
