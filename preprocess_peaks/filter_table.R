@@ -1,9 +1,8 @@
 library(tidyverse)
 library(tibble)
 
-ids <- read.delim('headers.txt', header=F)$V1
-name_matches <- read.csv("../../metadata/contexts_complete_data.csv", header=T, sep = ",")
-ids <- name_matches[match(x = ids, table = name_matches$SRA.ID), "context"]
+name_matches <- read.csv("../../rDHS_dm6/metadata/contexts_complete_data.csv", header=T, sep = ",")
+ids <- name_matches$context
 ids <- c("chr", "start", "end", "name", ids)
 
 
