@@ -12,7 +12,6 @@ class Sequence(Dataset):
         - one_hot_file (str): Path to the file containing one-hot encoded sequences.
         - signal_file (str): Path to the file containing signal data.
         - device (str, optional): Device to load data (default is 'cpu').
-        - sqrt_transform (bool, optional): Apply square root transformation to signal data (default is True).
 
     Methods:
         - __len__(): Get the number of samples in the dataset.

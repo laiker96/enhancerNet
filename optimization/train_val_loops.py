@@ -1,28 +1,33 @@
 import torch
 import numpy as np
+from typing import Optional, Tuple
+from torch.nn.modules.loss import _Loss, Module
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import OneCycleLR
-from torch.nn.modules.loss import _Loss
-from torch.utils.data.dataloader import DataLoader
-from typing import Optional, Tuple, List
+from torch.utils.data import DataLoader
+from typing import Optional
+import torch
 
-def train(network: torch.nn.Module, optimizer: Optimizer, 
+
+def train(network: Module, 
+          optimizer: Optimizer, 
           criterion: _Loss, 
-          train_loader: Optional[DataLoader] = None ,
+          train_loader: Optional[DataLoader] = None,
           return_loss: bool = False, 
-          lr_scheduler = None) -> Optional[float]:
+          lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None
+         ) -> Optional[float]:
     """
-    Trains the neural network model.
+    Trains a neural network for one full epoch.
 
-    Parameters:
-        - network (torch.nn.Module): The neural network model.
-        - optimizer (Optimizer): The optimizer for the neural network.
-        - criterion (_Loss): The loss function.
-        - train_loader (Optional[DataLoader]): DataLoader class with the training examples (default: None).
-        - return_loss (bool): Whether to return the average training loss(default: False).
+    Args:
+        network (torch.nn.Module): The neural network model to be trained.
+        optimizer (torch.optim.Optimizer): The optimizer used to update model parameters.
+        criterion (torch.nn._Loss): The loss function to minimize.
+        train_loader (Optional[torch.utils.data.DataLoader]): DataLoader providing training data. Defaults to None.
+        return_loss (bool): If True, returns the average training loss after the epoch.
+        lr_scheduler (Optional[torch.optim.lr_scheduler._LRScheduler]): Learning rate scheduler to update LR. Defaults to None.
 
     Returns:
-        - float or None: The average training loss if return_loss is True, else None.
+        Optional[float]: The average training loss if return_loss is True, otherwise None.
     """
     
     network.train()
@@ -48,30 +53,33 @@ def train(network: torch.nn.Module, optimizer: Optimizer,
     if return_loss:
         return avg_loss
 
-def test(network: torch.nn.Module, 
+
+def test(network: Module, 
          criterion: _Loss, 
          valid_loader: DataLoader, 
-         means_path: str = None, 
-         stds_path: str = None, 
+         means_path: Optional[str] = None, 
+         stds_path: Optional[str] = None, 
          DEVICE: torch.device = torch.device('cpu')) -> float:
     """
-    Tests the model. Transforms the z-score model output back to log2 scale using provided mean and std.
+    Evaluates the model on validation data. Optionally reverses z-score normalization 
+    on predictions using provided mean and standard deviation values, restoring them to log2 scale.
 
-    Parameters:
-        - network (torch.nn.Module): The neural network model.
-        - criterion (_Loss): The loss function.
-        - valid_loader (DataLoader): DataLoader with input data and log2-transformed targets.
-        - means_path (str): Path to .npy file with per-feature means (used for z-score normalization).
-        - stds_path (str): Path to .npy file with per-feature stds (used for z-score normalization).
+    Args:
+        network (torch.nn.Module): The trained neural network model.
+        criterion (torch.nn._Loss): The loss function to compute validation loss.
+        valid_loader (torch.utils.data.DataLoader): DataLoader containing validation inputs and log2-transformed targets.
+        means_path (Optional[str]): Path to .npy file with per-feature means (for reversing z-score normalization).
+        stds_path (Optional[str]): Path to .npy file with per-feature standard deviations (for reversing z-score normalization).
+        DEVICE (torch.device): Device on which computation should run (e.g., CPU or CUDA).
 
     Returns:
-        - float: Average validation loss in log2 space.
+        float: Average validation loss in log2-transformed space.
     """
     
     # Load normalization stats
     if not(means_path is None) and not (stds_path is None):
-        means = torch.tensor(np.load(means_path), dtype=torch.float32).to(DEVICE)
-        stds = torch.tensor(np.load(stds_path), dtype=torch.float32).to(DEVICE)
+        means = torch.from_numpy(np.load(means_path)).float().to(DEVICE)
+        stds = torch.from_numpy(np.load(stds_path)).float().to(DEVICE)
 
     network.eval()
     total_val_loss = 0
@@ -95,39 +103,51 @@ def test(network: torch.nn.Module,
     avg_val_loss = total_val_loss / len(valid_loader)
     return avg_val_loss
 
-
-def train_N_epochs(network: torch.nn.Module, optimizer: Optimizer, 
-                   criterion: _Loss, train_loader: DataLoader, 
-                   valid_loader: DataLoader, num_epochs: int, 
-                   verbose: bool = False, checkpoint: bool = True, 
-                   patience: int = 2, model_path: str = 'best_model', 
-                   best_valid_loss: float = float('inf'), 
-                   lr_scheduler = None, means_path = None, stds_path = None, DEVICE = torch.device('cpu')) -> Tuple[np.ndarray, np.ndarray]:
+def train_N_epochs(network: Module,
+                   optimizer: Optimizer,
+                   criterion: _Loss,
+                   train_loader: DataLoader,
+                   valid_loader: DataLoader,
+                   num_epochs: int,
+                   verbose: bool = False,
+                   checkpoint: bool = True,
+                   patience: int = 2,
+                   model_path: str = 'best_model',
+                   best_valid_loss: float = float('inf'),
+                   lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+                   means_path: Optional[str] = None,
+                   stds_path: Optional[str] = None,
+                   DEVICE: torch.device = torch.device('cpu')
+                   ) -> Tuple[Tuple[np.ndarray, np.ndarray, np.ndarray], float]:
     """
-    Train a neural network model for a specified number of epochs, monitoring and recording
-    average training and validation losses for each epoch.
+    Trains a neural network model for a specified number of epochs, while monitoring
+    training and validation loss. Supports learning rate scheduling, checkpointing,
+    and early stopping.
 
-    Parameters:
-        - network (torch.nn.Module): The neural network model to be trained.
-        - optimizer (Optimizer): The optimizer used for updating model weights.
-        - criterion (_Loss): The loss function used to compute the loss between predictions and targets.
-        - train_loader (DataLoader): DataLoader containing training data.
-        - valid_loader (DataLoader): DataLoader containing validation (or test) data.
-        - num_epochs (int): The number of training epochs (iterations over the training dataset).
-        - verbose (bool, optional): If True, print progress information during training (default is False).
-        - checkpoint (bool, optional): If True, save the model's state when validation loss improves (default is True).
-        - patience (int, optional): The number of epochs to wait for improvement in validation loss before early stopping (default is 2).
-        - model_path (str, optional): The path prefix where the best model checkpoint will be saved (default is 'best_model').
+    Args:
+        network (torch.nn.Module): The neural network model to train.
+        optimizer (torch.optim.Optimizer): Optimizer for updating model parameters.
+        criterion (torch.nn._Loss): Loss function for optimization.
+        train_loader (torch.utils.data.DataLoader): DataLoader for training data.
+        valid_loader (torch.utils.data.DataLoader): DataLoader for validation data.
+        num_epochs (int): Number of training epochs.
+        verbose (bool, optional): If True, prints training and validation loss per epoch. Default is False.
+        checkpoint (bool, optional): If True, saves best model weights. Default is True.
+        patience (int, optional): Epochs to wait for validation loss improvement before stopping. Default is 2.
+        model_path (str, optional): Path to save the best model checkpoint. Default is 'best_model'.
+        best_valid_loss (float, optional): Initial best validation loss. Default is infinity.
+        lr_scheduler (Optional[torch.optim.lr_scheduler._LRScheduler], optional): Scheduler to adjust learning rate. Default is None.
+        means_path (Optional[str], optional): Path to .npy file with per-feature means (for de-normalization). Default is None.
+        stds_path (Optional[str], optional): Path to .npy file with per-feature stds (for de-normalization). Default is None.
+        DEVICE (torch.device, optional): Device to run training on (CPU or CUDA). Default is CPU.
 
     Returns:
-        - Tuple[np.ndarray, np.ndarray]: A tuple containing two numpy arrays:
-          - The first array contains the average training losses for each epoch.
-          - The second array contains the average validation losses for each epoch.
-
-    Notes:
-        - Early stopping is applied if the validation loss does not improve for the specified patience epochs.
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
+            - Training losses (np.ndarray) over epochs.
+            - Validation losses (np.ndarray) over epochs.
+            - Learning rates (np.ndarray) over epochs.
+        float: The best observed validation loss.
     """
-
     
     train_losses = np.zeros(num_epochs)
     val_losses = np.zeros(num_epochs)
@@ -179,5 +199,3 @@ def train_N_epochs(network: torch.nn.Module, optimizer: Optimizer,
 
         
     return (train_losses[:epoch+1], val_losses[:epoch+1], learning_rates[:epoch+1]), best_valid_loss
-
-
