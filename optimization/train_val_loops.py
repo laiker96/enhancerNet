@@ -175,7 +175,7 @@ def train_N_epochs(network: Module,
             learning_rates[epoch] = lr_scheduler.get_last_lr()[0]
         
         print(f'Epoch {epoch} finished with val_loss: {avg_val_loss} and train_loss: {avg_train_loss}')
-            
+
         # Check if validation loss has improved
         if avg_val_loss < best_valid_loss:
             best_valid_loss = avg_val_loss
