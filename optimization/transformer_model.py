@@ -1,9 +1,8 @@
 import torch
 from torch import nn
-from .NNBlocks import (SqueezeExciteBlock, 
-                       ConvPoolingBlock, 
+from .NNBlocks import (ConvPoolingBlock, 
                        PositionalEncoding, 
-                       ConvBlock, LinearBlock)
+                       LinearBlock)
 
 class TransformerCNNMixtureModel(nn.Module):
     

@@ -5,14 +5,10 @@ from torch.optim.lr_scheduler import OneCycleLR
 from torch.nn.modules.loss import _Loss
 from torch.utils.data.dataloader import DataLoader
 from typing import Optional, Tuple, List
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 def train(network: torch.nn.Module, optimizer: Optimizer, 
           criterion: _Loss, 
-          limit_obs: bool = False, 
           train_loader: Optional[DataLoader] = None ,
-          n_train_examples: int = 10000, 
           return_loss: bool = False, 
           lr_scheduler = None) -> Optional[float]:
     """
@@ -22,9 +18,7 @@ def train(network: torch.nn.Module, optimizer: Optimizer,
         - network (torch.nn.Module): The neural network model.
         - optimizer (Optimizer): The optimizer for the neural network.
         - criterion (_Loss): The loss function.
-        - limit_obs (bool): Whether to limit the training examples for faster training (default: False).
         - train_loader (Optional[DataLoader]): DataLoader class with the training examples (default: None).
-        - n_train_examples (int): The number of training examples to consider if limit_obs is True (default: 10000).
         - return_loss (bool): Whether to return the average training loss(default: False).
 
     Returns:
@@ -32,13 +26,10 @@ def train(network: torch.nn.Module, optimizer: Optimizer,
     """
     
     network.train()
-    batch_size = train_loader.batch_size
     total_loss = 0
 
-    for batch_i, (data, target) in enumerate(train_loader):
+    for (data, target) in train_loader:
         
-        if limit_obs and (batch_i * batch_size >= n_train_examples):
-            break
         
         optimizer.zero_grad()
         output = network(data)
@@ -62,8 +53,7 @@ def test(network: torch.nn.Module,
          valid_loader: DataLoader, 
          means_path: str = None, 
          stds_path: str = None, 
-         limit_obs: bool = False, 
-         n_val_examples: int = 10000) -> float:
+         DEVICE: torch.device = torch.device('cpu')) -> float:
     """
     Tests the model. Transforms the z-score model output back to log2 scale using provided mean and std.
 
@@ -73,8 +63,6 @@ def test(network: torch.nn.Module,
         - valid_loader (DataLoader): DataLoader with input data and log2-transformed targets.
         - means_path (str): Path to .npy file with per-feature means (used for z-score normalization).
         - stds_path (str): Path to .npy file with per-feature stds (used for z-score normalization).
-        - limit_obs (bool): Whether to limit number of validation examples.
-        - n_val_examples (int): Max number of examples to evaluate.
 
     Returns:
         - float: Average validation loss in log2 space.
@@ -87,12 +75,10 @@ def test(network: torch.nn.Module,
 
     network.eval()
     total_val_loss = 0
-    batch_size = valid_loader.batch_size
     
     with torch.inference_mode():
-        for batch_i, (data, target_log2) in enumerate(valid_loader):
-            if limit_obs and (batch_i * batch_size > n_val_examples):
-                break
+        for (data, target_log2) in valid_loader:
+
 
             data = data.to(DEVICE)
             target_log2 = target_log2.to(DEVICE)
@@ -116,7 +102,7 @@ def train_N_epochs(network: torch.nn.Module, optimizer: Optimizer,
                    verbose: bool = False, checkpoint: bool = True, 
                    patience: int = 2, model_path: str = 'best_model', 
                    best_valid_loss: float = float('inf'), 
-                   lr_scheduler = None, means_path = None, stds_path = None) -> Tuple[np.ndarray, np.ndarray]:
+                   lr_scheduler = None, means_path = None, stds_path = None, DEVICE = torch.device('cpu')) -> Tuple[np.ndarray, np.ndarray]:
     """
     Train a neural network model for a specified number of epochs, monitoring and recording
     average training and validation losses for each epoch.
@@ -146,14 +132,8 @@ def train_N_epochs(network: torch.nn.Module, optimizer: Optimizer,
     train_losses = np.zeros(num_epochs)
     val_losses = np.zeros(num_epochs)
     learning_rates = np.zeros(num_epochs)
-    # Initialize early stopping parameters
-    #best_valid_loss = float('inf')
+    
     current_patience = 0
-    #if lr_scheduler is None:
-
-        #lr_scheduler = OneCycleLR(optimizer, max_lr = 1e-3, epochs = num_epochs, steps_per_epoch = len(train_loader))
-        #lr_scheduler = OneCycleLR(optimizer, max_lr = 1e-4, epochs = num_epochs, steps_per_epoch = len(train_loader))
-
         
     print('Training model:')
     print(network)
@@ -165,7 +145,7 @@ def train_N_epochs(network: torch.nn.Module, optimizer: Optimizer,
                                train_loader=train_loader, 
                                return_loss=True, lr_scheduler=lr_scheduler)
         
-        avg_val_loss = test(network, criterion, valid_loader, means_path, stds_path)
+        avg_val_loss = test(network, criterion, valid_loader, means_path, stds_path, DEVICE = DEVICE)
         
         train_losses[epoch] = avg_train_loss
         val_losses[epoch] = avg_val_loss

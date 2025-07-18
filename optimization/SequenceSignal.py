@@ -24,7 +24,7 @@ class Sequence(Dataset):
     """
     
     def __init__(self, one_hot_file: str, 
-                 device: str = 'cpu'):
+                 device: torch.device = torch.device('cpu')):
         
         self.one_hot_data = np.load(one_hot_file)
         self.device = device
@@ -58,14 +58,12 @@ class Sequence(Dataset):
         return one_hot_tensor
     
     @staticmethod
-    def one_hot_encoding(sequence: str, num_mutations: int = 0) -> np.ndarray:
+    def one_hot_encoding(sequence: str) -> np.ndarray:
         """
         Encode a DNA sequence to a one-hot encoded matrix and add N mutations during encoding.
 
         Parameters:
             - sequence (str): DNA sequence to be encoded.
-            - num_mutations (int): Number of random mutations to introduce.
-
         Returns:
             np.ndarray: One-hot encoded matrix of shape (4 x seq_length).
                     N's are treated as a uniform distribution (0.25 in all 4 channels that sum to 1).
@@ -88,22 +86,8 @@ class Sequence(Dataset):
         n_positions = (indices == 4)
         encoding[:, n_positions] = 0.25
 
-        # Mutation Handling
-        if num_mutations > 0:
-            # Choose mutation positions and mutation types
-            mutation_positions = np.random.choice(seq_len, size=num_mutations, replace=False)
-            mutation_types = np.random.choice(4, size=num_mutations)
-
-            # Apply mutations
-            encoding[:, mutation_positions] = 0  # Reset positions to zero
-            encoding[mutation_types, mutation_positions] = 1.0  # Apply mutations
 
         return encoding
-
-
-
-
-
 
 class SequenceSignal(Sequence):
     
@@ -114,7 +98,6 @@ class SequenceSignal(Sequence):
         - one_hot_file (str): Path to the file containing one-hot encoded sequences.
         - signal_file (str): Path to the file containing signal data.
         - device (str, optional): Device to load data (default is 'cpu').
-        - sqrt_transform (bool, optional): Apply square root transformation to signal data (default is True).
 
     Methods:
         - __len__(): Get the number of samples in the dataset.
@@ -126,15 +109,10 @@ class SequenceSignal(Sequence):
     """
     
     def __init__(self, one_hot_file: str, signal_file: str, 
-                 device: str = 'cpu', sqrt_transform: bool = True, 
-                 num_mutations = 0):
+                 device: torch.device = torch.device('cpu')):
         
         super().__init__(one_hot_file, device = device)
-        self.num_mutations = num_mutations
-        if sqrt_transform:
-            self.signal_data = np.sqrt(np.load(signal_file))
-        else:
-            self.signal_data = np.load(signal_file)
+        self.signal_data = np.load(signal_file)
 
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -148,8 +126,7 @@ class SequenceSignal(Sequence):
             Tuple[torch.Tensor, torch.Tensor]: A tuple containing one-hot encoded sequence tensor and signal tensor.
         """
         
-        one_hot_tensor = torch.tensor(SequenceSignal.one_hot_encoding(self.one_hot_data[index], 
-                                                                      num_mutations = self.num_mutations), 
+        one_hot_tensor = torch.tensor(SequenceSignal.one_hot_encoding(self.one_hot_data[index]), 
                                       dtype = torch.float32, 
                                       device = self.device)
         
@@ -190,3 +167,33 @@ def loadDataset(train_dataset: SequenceSignal,
     return (train_loader, valid_loader)
 
 
+def load_dataset(train_encoding_path: str, 
+                 train_signal_path: str, 
+                 val_encoding_path: str, 
+                 val_signal_path: str, 
+                 batch_size: int, 
+                 device: torch.device = torch.device('cpu'), shuffle = True,
+                 **kwargs) -> Tuple[DataLoader, DataLoader]:
+    """
+    Load and prepare the training and validation datasets.
+
+    Args:
+        train_encoding_path (str): Path to the training encoding file.
+        train_signal_path (str): Path to the training signal file.
+        val_encoding_path (str): Path to the validation encoding file.
+        val_signal_path (str): Path to the validation signal file.
+        batch_size (int): Batch size for training.
+        device (str): Device to load data ('cpu' or 'cuda').
+
+    Returns:
+        Tuple[DataLoader, DataLoader]: Tuple containing train and validation dataloaders.
+    """
+    train_dataset = SequenceSignal(train_encoding_path, train_signal_path,
+                                                 device=device, **kwargs)
+
+    val_dataset = SequenceSignal(val_encoding_path, val_signal_path, 
+                                                device=device, **kwargs)
+
+    dataloaders = loadDataset(train_dataset, val_dataset, batch_size, shuffle = shuffle)
+    
+    return dataloaders

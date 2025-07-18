@@ -80,8 +80,6 @@ class ConvBlock(nn.Module):
         return self.block(x)
 
 
-
-
 class ConvPoolingBlock(nn.Module):
     def __init__(
         self,
