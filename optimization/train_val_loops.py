@@ -6,6 +6,7 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from typing import Optional
 import torch
+from pathlib import Path
 
 
 def train(network: Module, 
@@ -103,20 +104,20 @@ def test(network: Module,
     avg_val_loss = total_val_loss / len(valid_loader)
     return avg_val_loss
 
+
 def train_N_epochs(network: Module,
                    optimizer: Optimizer,
                    criterion: _Loss,
                    train_loader: DataLoader,
                    valid_loader: DataLoader,
                    num_epochs: int,
-                   verbose: bool = False,
                    checkpoint: bool = True,
                    patience: int = 2,
-                   model_path: str = 'best_model',
+                   model_path: Path = 'best_model.pth',
                    best_valid_loss: float = float('inf'),
                    lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-                   means_path: Optional[str] = None,
-                   stds_path: Optional[str] = None,
+                   means_path: Optional[Path] = None,
+                   stds_path: Optional[Path] = None,
                    DEVICE: torch.device = torch.device('cpu')
                    ) -> Tuple[Tuple[np.ndarray, np.ndarray, np.ndarray], float]:
     """
@@ -131,7 +132,6 @@ def train_N_epochs(network: Module,
         train_loader (torch.utils.data.DataLoader): DataLoader for training data.
         valid_loader (torch.utils.data.DataLoader): DataLoader for validation data.
         num_epochs (int): Number of training epochs.
-        verbose (bool, optional): If True, prints training and validation loss per epoch. Default is False.
         checkpoint (bool, optional): If True, saves best model weights. Default is True.
         patience (int, optional): Epochs to wait for validation loss improvement before stopping. Default is 2.
         model_path (str, optional): Path to save the best model checkpoint. Default is 'best_model'.
@@ -174,8 +174,7 @@ def train_N_epochs(network: Module,
             
             learning_rates[epoch] = lr_scheduler.get_last_lr()[0]
         
-        if verbose:
-            print(f'Epoch {epoch} finished with val_loss: {avg_val_loss} and train_loss: {avg_train_loss}')
+        print(f'Epoch {epoch} finished with val_loss: {avg_val_loss} and train_loss: {avg_train_loss}')
             
         # Check if validation loss has improved
         if avg_val_loss < best_valid_loss:

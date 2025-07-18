@@ -24,8 +24,7 @@ class TransformerCNNMixtureModel(nn.Module):
                  n_neurons: List[int],
                  drop_fc: float,
                  input_size: int = 4,
-                 output_size: int = 9,
-                 sequence_length: int = 1000) -> None:
+                 output_size: int = 9) -> None:
         """
         Initialize the TransformerCNNMixtureModel.
 
@@ -47,7 +46,6 @@ class TransformerCNNMixtureModel(nn.Module):
 
             input_size (int): Number of input channels (e.g., 4 for DNA sequences).
             output_size (int): Number of output neurons.
-            sequence_length (int): Length of the input sequence.
         """
         super().__init__()
 
@@ -59,10 +57,6 @@ class TransformerCNNMixtureModel(nn.Module):
                              dropout=drop_conv))
         
         self.convs = nn.ModuleList([conv_block_0])
-
-        # Calculation of sequence length after conv layer + max_pooling with size 2
-        out_size = sequence_length - dilation[0] * (kernel_sizes[0] - 1)
-        out_size = int(out_size / 2)
         
         for i in range(1, n_conv_layers):
             conv_block = nn.Sequential(
@@ -71,9 +65,6 @@ class TransformerCNNMixtureModel(nn.Module):
                                  dilation=dilation[i], 
                                  dropout=drop_conv))
             self.convs.append(conv_block)
-            
-            out_size = out_size - dilation[i] * (kernel_sizes[i] - 1)
-            out_size = int(out_size / 2)
         
         # Positional encoding layer
         d_model = n_filters[-1]  # Embedding dimension of the attention layers

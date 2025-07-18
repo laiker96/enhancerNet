@@ -18,9 +18,4 @@ np.save("targets_zscore.npy", zscore_targets)
 # Step 5: Save mean and std for inverse-transform
 np.save("zscore_means.npy", means)
 np.save("zscore_stds.npy", stds)
-
-# Optional: also save as CSV
-pd.DataFrame(means, columns=["mean"]).to_csv("zscore_means.csv", index=False)
-pd.DataFrame(stds, columns=["std"]).to_csv("zscore_stds.csv", index=False)
-
 print("✅ Z-score normalization complete and saved.")
