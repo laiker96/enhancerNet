@@ -138,11 +138,11 @@ class SequenceSignal(Sequence):
         return one_hot_tensor, signal_tensor
 
 
-def loadDataset(train_dataset: SequenceSignal, 
-                test_dataset: SequenceSignal,
-                batch_size: int, 
-                shuffle: bool = True
-                ) -> Tuple[DataLoader, DataLoader]:
+def _loadDataset(train_dataset: SequenceSignal, 
+                 test_dataset: SequenceSignal,
+                 batch_size: int, 
+                 shuffle: bool = True
+                 ) -> Tuple[DataLoader, DataLoader]:
     """
     Load train and validation datasets into DataLoader objects.
 
@@ -202,9 +202,9 @@ def load_dataset(train_encoding_path: str,
                                  device=device, 
                                  **kwargs)
 
-    dataloaders = loadDataset(train_dataset, 
-                              val_dataset, 
-                              batch_size, 
-                              shuffle = shuffle)
+    dataloaders = _loadDataset(train_dataset, 
+                               val_dataset, 
+                               batch_size, 
+                               shuffle = shuffle)
     
     return dataloaders
