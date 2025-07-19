@@ -111,7 +111,6 @@ def train_N_epochs(network: Module,
                    train_loader: DataLoader,
                    valid_loader: DataLoader,
                    num_epochs: int,
-                   checkpoint: bool = True,
                    patience: int = 2,
                    model_path: Path = 'best_model.pth',
                    best_valid_loss: float = float('inf'),
@@ -132,7 +131,6 @@ def train_N_epochs(network: Module,
         train_loader (torch.utils.data.DataLoader): DataLoader for training data.
         valid_loader (torch.utils.data.DataLoader): DataLoader for validation data.
         num_epochs (int): Number of training epochs.
-        checkpoint (bool, optional): If True, saves best model weights. Default is True.
         patience (int, optional): Epochs to wait for validation loss improvement before stopping. Default is 2.
         model_path (str, optional): Path to save the best model checkpoint. Default is 'best_model'.
         best_valid_loss (float, optional): Initial best validation loss. Default is infinity.
@@ -173,25 +171,31 @@ def train_N_epochs(network: Module,
         if lr_scheduler is not None:
             
             learning_rates[epoch] = lr_scheduler.get_last_lr()[0]
+            print(f'Epoch {epoch} finished with learning rate: {learning_rates[epoch]}')
         
-        print(f'Epoch {epoch} finished with val_loss: {avg_val_loss} and train_loss: {avg_train_loss}')
+        print(f'Epoch {epoch} finished with val_loss = {avg_val_loss} and train_loss = {avg_train_loss}')
 
-        # Check if validation loss has improved
         if avg_val_loss < best_valid_loss:
             best_valid_loss = avg_val_loss
             current_patience = 0
-            # Save the model checkpoint if needed
-            if checkpoint:
+            print(f'Validation loss improved to {best_valid_loss}. Saving model to {model_path}')
+            
+            if lr_scheduler is not None:
                 checkpoint_dict = {'epoch': epoch, 
                                    'network': network.state_dict(), 
                                    'optimizer': optimizer.state_dict(),
-                                   'lr_sched': lr_scheduler.state_dict() if lr_scheduler else None, 
+                                   'lr_sched': lr_scheduler.state_dict(), 
                                    'best_valid_loss': best_valid_loss}
-                torch.save(checkpoint_dict, f'{model_path}')
+            else:
+                checkpoint_dict = {'epoch': epoch, 
+                                   'network': network.state_dict(), 
+                                   'optimizer': optimizer.state_dict(),
+                                   'best_valid_loss': best_valid_loss}
+            
+            torch.save(checkpoint_dict, f'{model_path}')
         else:
             current_patience += 1
         
-        # Check if early stopping criteria met
         if current_patience >= patience:
             print("Early stopping! Validation loss hasn't improved for {} epochs.".format(patience))
             break
