@@ -107,7 +107,9 @@ class SequenceSignal(Sequence):
         - It allows customization of the device and signal data transformation.
     """
     
-    def __init__(self, one_hot_file: str, signal_file: str, 
+    def __init__(self, 
+                 one_hot_file: str, 
+                 signal_file: str, 
                  device: torch.device = torch.device('cpu')):
         
         super().__init__(one_hot_file, device = device)
@@ -138,7 +140,9 @@ class SequenceSignal(Sequence):
 
 def loadDataset(train_dataset: SequenceSignal, 
                 test_dataset: SequenceSignal,
-                batch_size: int, shuffle: bool = True) -> Tuple[DataLoader, DataLoader]:
+                batch_size: int, 
+                shuffle: bool = True
+                ) -> Tuple[DataLoader, DataLoader]:
     """
     Load train and validation datasets into DataLoader objects.
 
@@ -171,8 +175,9 @@ def load_dataset(train_encoding_path: str,
                  val_encoding_path: str, 
                  val_signal_path: str, 
                  batch_size: int, 
-                 device: torch.device = torch.device('cpu'), shuffle = True,
-                 **kwargs) -> Tuple[DataLoader, DataLoader]:
+                 device: torch.device = torch.device('cpu'), 
+                 shuffle = True, **kwargs
+                 ) -> Tuple[DataLoader, DataLoader]:
     """
     Load and prepare the training and validation datasets.
 
@@ -187,12 +192,19 @@ def load_dataset(train_encoding_path: str,
     Returns:
         Tuple[DataLoader, DataLoader]: Tuple containing train and validation dataloaders.
     """
-    train_dataset = SequenceSignal(train_encoding_path, train_signal_path,
-                                                 device=device, **kwargs)
+    train_dataset = SequenceSignal(train_encoding_path, 
+                                   train_signal_path,
+                                   device = device, 
+                                   **kwargs)
 
-    val_dataset = SequenceSignal(val_encoding_path, val_signal_path, 
-                                                device=device, **kwargs)
+    val_dataset = SequenceSignal(val_encoding_path, 
+                                 val_signal_path, 
+                                 device=device, 
+                                 **kwargs)
 
-    dataloaders = loadDataset(train_dataset, val_dataset, batch_size, shuffle = shuffle)
+    dataloaders = loadDataset(train_dataset, 
+                              val_dataset, 
+                              batch_size, 
+                              shuffle = shuffle)
     
     return dataloaders
