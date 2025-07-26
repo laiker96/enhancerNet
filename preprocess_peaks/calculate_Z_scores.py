@@ -1,21 +1,37 @@
+import argparse
 import numpy as np
-import pandas as pd
 
-# Step 1: Load the .npy target array
-targets = np.load("train_target.npy")  # shape: (1286550, 9)
-assert targets.ndim == 2 and targets.shape[1] == 9, "Expected shape (N, 9)"
+def zscore_normalize(
+    input_npy,
+    output_npy="targets_zscore.npy",
+    mean_file="zscore_means.npy",
+    std_file="zscore_stds.npy"
+):
+    # Load input
+    targets = np.load(input_npy)
+    assert targets.ndim == 2, f"Expected 2D array, got shape {targets.shape}"
 
-# Step 2: Compute column-wise mean and std
-means = targets.mean(axis=0)
-stds = targets.std(axis=0)
+    # Compute mean and std
+    means = targets.mean(axis=0)
+    stds = targets.std(axis=0)
 
-# Step 3: Z-score normalization
-zscore_targets = (targets - means) / stds
+    # Z-score normalization
+    zscore_targets = (targets - means) / stds
 
-# Step 4: Save normalized targets
-np.save("targets_zscore.npy", zscore_targets)
+    # Save outputs
+    np.save(output_npy, zscore_targets)
+    np.save(mean_file, means)
+    np.save(std_file, stds)
 
-# Step 5: Save mean and std for inverse-transform
-np.save("zscore_means.npy", means)
-np.save("zscore_stds.npy", stds)
-print("✅ Z-score normalization complete and saved.")
+    print("✅ Z-score normalization complete and saved.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Z-score normalize a target .npy array")
+    parser.add_argument("input_npy", help="Input .npy file (2D array)")
+    parser.add_argument("--output", "-o", default="targets_zscore.npy", help="Normalized output .npy file")
+    parser.add_argument("--mean", "-m", default="zscore_means.npy", help="File to save means")
+    parser.add_argument("--std", "-s", default="zscore_stds.npy", help="File to save stds")
+
+    args = parser.parse_args()
+    zscore_normalize(args.input_npy, args.output, args.mean, args.std)
+
