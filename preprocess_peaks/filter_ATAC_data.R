@@ -8,8 +8,7 @@ suppressPackageStartupMessages({
 # --- Define command-line options ---
 option_list <- list(
   make_option(c("-i", "--input"), type = "character", help = "Indicator BED file", metavar = "FILE"),
-  make_option(c("-m", "--metadata"), type = "character", help = "Metadata CSV file", metavar = "FILE"),
-  make_option(c("-o", "--output"), type = "character", default = "dataset_1kb_300bp_S3.bed",
+  make_option(c("-o", "--output"), type = "character", default = "dataset_1kb_300bp.bed",
               help = "Output BED file [default: %default]", metavar = "FILE"),
   make_option(c("-t", "--threshold"), type = "double", default = 0.7,
               help = "Threshold for cCRE indicator [default: %default]"),
@@ -22,22 +21,17 @@ opt_parser <- OptionParser(option_list = option_list)
 opt <- parse_args(opt_parser)
 
 # --- Check required arguments ---
-if (is.null(opt$input) || is.null(opt$metadata)) {
+if (is.null(opt$input)) {
   print_help(opt_parser)
-  stop("Error: --input and --metadata are required.", call. = FALSE)
+  stop("Error: --input required.", call. = FALSE)
 }
-
-# --- Read metadata and set column names ---
-metadata <- read.csv(opt$metadata, header = TRUE)
-context_ids <- metadata$context
-column_names <- c("chr", "start", "end", "name", context_ids)
 
 # --- Read and clean indicator data ---
 data <- read.delim(opt$input, header = FALSE)
 data <- data[complete.cases(data), ]
 
 # --- Define signal columns and indicator column ---
-num_signals <- length(context_ids)
+num_signals <- dim(data)[2] - 4 - 1
 signal_cols <- 5:(4 + num_signals)
 indicator_col <- 4 + num_signals + 1
 
@@ -66,7 +60,6 @@ sampled_negatives <- negative_samples %>%
 # --- Combine and drop indicator column ---
 output_data <- bind_rows(positive_samples, sampled_negatives) %>%
   select(-all_of(indicator_col))
-colnames(output_data) <- column_names
 
 # --- Write output ---
 write.table(

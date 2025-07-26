@@ -44,7 +44,7 @@ generate_windows() {
 
 create_extended_summits() {
     local output="$1"
-    cat "$peak_dir"/*/*.narrowPeak "$peak_dir"/H3K27ac/*.bed \
+    cat "$peak_dir"/ATAC/*/*.narrowPeak "$peak_dir"/H3K27ac/*.bed \
     | awk 'BEGIN {FS=OFS="\t"} {summit=$2+$(NF); print $1, summit, summit+1, $4, $5, $6, $7, $8, $9, $(NF)}' \
     | sort-bed --max-mem 8G - \
     | bedtools slop -g "$chrom_sizes" -r 150 -l 149 -i - \
@@ -53,7 +53,7 @@ create_extended_summits() {
 
 create_map_cres() {
     local output="$1"
-    cat "$peak_dir"/*/*.narrowPeak "$peak_dir"/H3K27ac/*.bed "$cre_dir"/cCREs.bed \
+    cat "$peak_dir"/ATAC/*/*.narrowPeak "$peak_dir"/H3K27ac/*.bed "$cre_dir"/cCREs.bed \
     | awk 'BEGIN {FS=OFS="\t"} {print $1, $2, $3}' \
     | sort-bed --max-mem 8G - \
     | bedtools merge > "$output"
@@ -66,8 +66,8 @@ add_signal_values() {
 
     cp "$window_bed" "$ref_output"
 
-    tail -n +2 "$metadata_file" | cut -f 5 -d , | while read -r SRA; do
-        local bw_file="$signal_dir/${SRA}_S3.bw"
+    cat "$metadata_file" | while read -r SRA; do
+        local bw_file="$signal_dir/${SRA}.bw"
         bigWigAverageOverBed "$bw_file" "$window_bed" -bedOut=tmp.bed -sampleAroundCenter=300 out.tab
         cut -f 5 tmp.bed | paste "$ref_output" - > tmp && mv tmp "$ref_output"
         rm tmp.bed out.tab
@@ -115,7 +115,7 @@ generate_labels_CREs() {
 
     cp "$center_bed" "$output"
 
-    tail -n +2 "$metadata_file" | cut -f 1 -d , | while read -r ID; do
+    cat "$metadata_file" | while read -r ID; do
         echo "Adding CRE label: dELS_${ID}"
         bedmap \
             --echo \
