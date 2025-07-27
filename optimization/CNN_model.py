@@ -5,7 +5,7 @@ from .NNBlocks import (SqueezeExciteBlock,
                        PositionalEncoding)
 
 
-class SEConvNet(nn.Module):
+class ConvNet(nn.Module):
 
     
     """
