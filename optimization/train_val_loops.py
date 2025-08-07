@@ -7,15 +7,19 @@ from torch.utils.data import DataLoader
 from typing import Optional
 import torch
 from pathlib import Path
-
+from torch.amp import autocast, GradScaler
 
 def train(network: Module, 
           optimizer: Optimizer, 
           criterion: _Loss, 
           train_loader: Optional[DataLoader] = None,
           return_loss: bool = False, 
-          lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None
+          lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+          scaler: Optional[GradScaler] = None,
+          DEVICE: torch.device = torch.device('cpu'),
+          use_amp: bool = False
          ) -> Optional[float]:
+
     """
     Trains a neural network for one full epoch.
 
@@ -35,21 +39,31 @@ def train(network: Module,
     total_loss = 0
 
     for (data, target) in train_loader:
-        
-        
+        data = data.to(DEVICE)
+        target = target.to(DEVICE)
+
         optimizer.zero_grad()
-        output = network(data)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
+        
+        if use_amp:
+            with autocast('cuda'):
+                output = network(data)
+                loss = criterion(output, target)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            output = network(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+
         total_loss += loss.item()
 
-        if not lr_scheduler is None:
+        if lr_scheduler is not None:
             lr_scheduler.step()
-            
-        
+
     avg_loss = total_loss / len(train_loader)
-    if not lr_scheduler is None:
+    if lr_scheduler is not None:
         print(lr_scheduler.get_last_lr()[0])
     if return_loss:
         return avg_loss
@@ -60,7 +74,9 @@ def test(network: Module,
          valid_loader: DataLoader, 
          means_path: Optional[str] = None, 
          stds_path: Optional[str] = None, 
-         DEVICE: torch.device = torch.device('cpu')) -> float:
+         DEVICE: torch.device = torch.device('cpu'),
+         use_amp: bool = False
+         ) -> float:
     """
     Evaluates the model on validation data. Optionally reverses z-score normalization 
     on predictions using provided mean and standard deviation values, restoring them to log2 scale.
@@ -77,29 +93,27 @@ def test(network: Module,
         float: Average validation loss in log2-transformed space.
     """
     
-    # Load normalization stats
-    if not(means_path is None) and not (stds_path is None):
+    if means_path is not None and stds_path is not None:
         means = torch.from_numpy(np.load(means_path)).float().to(DEVICE)
         stds = torch.from_numpy(np.load(stds_path)).float().to(DEVICE)
 
     network.eval()
     total_val_loss = 0
-    
-    with torch.inference_mode():
+
+    with torch.no_grad():
         for (data, target_log2) in valid_loader:
-
-
             data = data.to(DEVICE)
             target_log2 = target_log2.to(DEVICE)
 
-            output_z = network(data)
-            if not(means_path is None) and not (stds_path is None):
-                output_log2 = output_z * stds + means  # reverse z-score to log2
-            else:
-                output_log2 = output_z
+            with autocast('cuda', enabled=use_amp):
+                output_z = network(data)
+                if means_path is not None and stds_path is not None:
+                    output_log2 = output_z * stds + means
+                else:
+                    output_log2 = output_z
 
-            val_loss = criterion(output_log2, target_log2)
-            total_val_loss += val_loss.item()
+                val_loss = criterion(output_log2, target_log2)
+                total_val_loss += val_loss.item()
 
     avg_val_loss = total_val_loss / len(valid_loader)
     return avg_val_loss
@@ -117,6 +131,7 @@ def train_N_epochs(network: Module,
                    lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
                    means_path: Optional[Path] = None,
                    stds_path: Optional[Path] = None,
+                   use_amp: bool = False,
                    DEVICE: torch.device = torch.device('cpu')
                    ) -> Tuple[Tuple[np.ndarray, np.ndarray, np.ndarray], float]:
     """
@@ -146,7 +161,7 @@ def train_N_epochs(network: Module,
             - Learning rates (np.ndarray) over epochs.
         float: The best observed validation loss.
     """
-    
+    scaler = GradScaler('cuda') if use_amp else None
     train_losses = np.zeros(num_epochs)
     val_losses = np.zeros(num_epochs)
     learning_rates = np.zeros(num_epochs)
@@ -161,10 +176,17 @@ def train_N_epochs(network: Module,
         
         avg_train_loss = train(network, optimizer, criterion, 
                                train_loader=train_loader, 
-                               return_loss=True, lr_scheduler=lr_scheduler)
-        
-        avg_val_loss = test(network, criterion, valid_loader, means_path, stds_path, DEVICE = DEVICE)
-        
+                               return_loss=True, 
+                               lr_scheduler=lr_scheduler,
+                               scaler=scaler,
+                               DEVICE=DEVICE,
+                               use_amp=use_amp)
+
+        avg_val_loss = test(network, criterion, valid_loader, 
+                            means_path, stds_path,
+                            DEVICE=DEVICE,
+                            use_amp=use_amp)
+
         train_losses[epoch] = avg_train_loss
         val_losses[epoch] = avg_val_loss
        

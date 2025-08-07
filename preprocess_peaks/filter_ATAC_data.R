@@ -35,15 +35,24 @@ num_signals <- dim(data)[2] - 4 - 1
 signal_cols <- 5:(4 + num_signals)
 indicator_col <- 4 + num_signals + 1
 
-# --- Quantile-based filtering ---
+# --- Quantile-based filtering with zero removal and "all outliers" logic ---
+
+# Compute quantile limits
 upper_limits <- sapply(data[, signal_cols], quantile, probs = 0.995)
 lower_limits <- sapply(data[, signal_cols], quantile, probs = 0.1)
 
-for (j in seq_along(signal_cols)) {
-  idx <- signal_cols[j]
-  data <- data[data[, idx] < upper_limits[j], ]
-  data <- data[data[, idx] > lower_limits[j], ]
-}
+# Remove rows with any zero values in signal columns
+non_zero_mask <- apply(data[, signal_cols], 1, function(row) all(row != 0))
+data <- data[non_zero_mask, ]
+
+# Logical matrix: TRUE if each value is within limits
+within_limits <- mapply(function(col, lower, upper) {
+  data[[col]] > lower & data[[col]] < upper
+}, signal_cols, lower_limits, upper_limits)
+
+# Keep rows where at least one signal column is within limits
+rows_to_keep <- apply(within_limits, 1, all)
+data <- data[rows_to_keep, ]
 
 # --- Log2 transform signal values ---
 data[, signal_cols] <- log2(data[, signal_cols])

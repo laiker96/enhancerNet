@@ -46,9 +46,9 @@ create_extended_summits() {
     local output="$1"
     cat "$peak_dir"/ATAC/*/*.narrowPeak "$peak_dir"/H3K27ac/*.bed \
     | awk 'BEGIN {FS=OFS="\t"} {summit=$2+$(NF); print $1, summit, summit+1, $4, $5, $6, $7, $8, $9, $(NF)}' \
+    | bedtools slop -g "$chrom_sizes" -r 200 -l 199 -i - \
     | sort-bed --max-mem 8G - \
-    | bedtools slop -g "$chrom_sizes" -r 150 -l 149 -i - \
-    | awk '$3 - $2 == 300' > "$output"
+    | awk '$3 - $2 == 400' > "$output"
 }
 
 create_map_cres() {
@@ -68,7 +68,7 @@ add_signal_values() {
 
     cat "$metadata_file" | while read -r SRA; do
         local bw_file="$signal_dir/${SRA}.bw"
-        bigWigAverageOverBed "$bw_file" "$window_bed" -bedOut=tmp.bed -sampleAroundCenter=300 out.tab
+        bigWigAverageOverBed "$bw_file" "$window_bed" -bedOut=tmp.bed -sampleAroundCenter=400 out.tab
         cut -f 5 tmp.bed | paste "$ref_output" - > tmp && mv tmp "$ref_output"
         rm tmp.bed out.tab
     done
@@ -166,7 +166,7 @@ echo "Extracting signal values..."
 add_signal_values "$window_bed" "$metadata" "$reference_bed"
 
 echo "Extracting 300bp centers from 1kb windows..."
-extract_centered_regions "$reference_bed" "$center_bed" 300
+extract_centered_regions "$reference_bed" "$center_bed" 400
 
 echo "Extracting 500bp centers from 1kb windows..."
 extract_centered_regions "$window_bed" "$center_bed_500" 500
