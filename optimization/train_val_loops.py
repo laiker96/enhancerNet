@@ -39,6 +39,7 @@ def train(network: Module,
     total_loss = 0
 
     for (data, target) in train_loader:
+        
         data = data.to(DEVICE)
         target = target.to(DEVICE)
 
