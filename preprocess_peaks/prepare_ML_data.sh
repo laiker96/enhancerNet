@@ -126,7 +126,7 @@ generate_labels_CREs() {
             "$cre_dir/dELS_${ID}.bed" \
             > "$tmp_file" && mv "$tmp_file" "$output"
     done
-
+    
     echo "Adding final cCRE map region label..."
     bedmap \
         --echo \
@@ -135,7 +135,7 @@ generate_labels_CREs() {
         "$output" \
         "$map_regions_cCREs" \
         > "$tmp_file" && mv "$tmp_file" "$output"
-
+    
     echo "Appending labels to window coordinates..."
     cut -f 1-4 --complement "$output" \
         | paste "$window_bed" - \
