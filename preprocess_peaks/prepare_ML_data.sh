@@ -183,5 +183,3 @@ generate_labels_CREs \
   "$metadata" \
   "$cre_dir"
 
-echo "✅ Done! Output: $final_output"
-
