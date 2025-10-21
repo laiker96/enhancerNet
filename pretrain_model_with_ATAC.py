@@ -4,7 +4,6 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch import nn, optim
-from torchinfo import summary
 from model_structure import SequenceSignal, transformer_model, train_val_loops
 
 def parse_args():

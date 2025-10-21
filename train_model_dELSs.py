@@ -5,7 +5,6 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchinfo import summary
 from model_structure import (SequenceSignal, 
                              transformer_model, 
                              train_val_loops)
