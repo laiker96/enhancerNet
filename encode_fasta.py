@@ -2,17 +2,20 @@
 import argparse
 import numpy as np
 
-def one_hot_encode_sequence(seq):
+def one_hot_encode_sequence(seq, target_len=1000):
     """
-    One-hot encode a DNA sequence (A,C,G,T) into shape (length, 4)
-    Unknown characters are all zeros.
+    One-hot encode a DNA sequence (A,C,G,T) into shape (4, target_len).
+    Unknown characters are zeros.
+    Sequences longer than target_len are truncated.
+    Sequences shorter are zero-padded.
     """
     mapping = {'A':0, 'C':1, 'G':2, 'T':3}
-    seq_len = len(seq)
-    encoding = np.zeros((seq_len, 4), dtype=np.float32)
-    for i, base in enumerate(seq.upper()):
+    seq = seq.upper()
+    encoding = np.zeros((4, target_len), dtype=np.float32)
+    
+    for i, base in enumerate(seq[:target_len]):  # truncate if longer
         if base in mapping:
-            encoding[i, mapping[base]] = 1.0
+            encoding[mapping[base], i] = 1.0
     return encoding
 
 def main():
@@ -35,13 +38,11 @@ def main():
         if seq:
             sequences.append(one_hot_encode_sequence(seq))
 
-    # Pad sequences to same length if needed
-    max_len = max(s.shape[0] for s in sequences)
-    encoded_array = np.zeros((len(sequences), max_len, 4), dtype=np.float32)
-    for i, s in enumerate(sequences):
-        encoded_array[i, :s.shape[0], :] = s
-
+    # Convert to numpy array
+    encoded_array = np.stack(sequences, axis=0)  # shape: [batch_size, 4, 1000]
     np.save(args.output, encoded_array)
+    print(f"Saved encoded array with shape {encoded_array.shape} to {args.output}")
 
 if __name__ == "__main__":
     main()
+
