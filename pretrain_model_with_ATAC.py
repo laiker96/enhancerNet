@@ -58,7 +58,6 @@ def main():
         n_transformer_FC_layers=256
     )
     model.to(device)
-    summary(model)
 
     # Optimizer & scheduler
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=5e-3)
