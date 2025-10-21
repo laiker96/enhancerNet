@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="FASTA -> one-hot -> model predictions -> npy")
     parser.add_argument("fasta_file", type=str, help="Input FASTA file")
     parser.add_argument("output_file", type=str, help="Output .npy file with probabilities")
-    parser.add_argument("--checkpoint", type=str, default="model_weights/pretrained_model.pth")
+    parser.add_argument("--checkpoint", type=str, default="model_weights/best_model_dELSs.pth")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--batch_size", type=int, default=128)
     args = parser.parse_args()
