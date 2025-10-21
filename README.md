@@ -39,7 +39,7 @@ The model is trained using a **two-step strategy**: first as a regression model 
 ---
 
 ## Repository Structure
-
+```bash
 .
 ├── model_structure/ # PyTorch model architectures
 ├── model_weights/ # Pretrained model weights
@@ -50,7 +50,7 @@ The model is trained using a **two-step strategy**: first as a regression model 
 ├── run_prediction.py # Main script for running predictions
 ├── Dockerfile # Docker setup for reproducible environment
 └── README.md
-
+```
 
 ---
 
