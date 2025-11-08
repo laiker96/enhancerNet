@@ -44,9 +44,6 @@ def one_hot_encoding(sequence: str) -> np.ndarray:
             encoding[:, i] = 0.25 
     return encoding.reshape(1, 4, -1)
 
-
-
-
 def process_fasta(filename: str) -> None:
     """
     Process a multi-FASTA file into a numpy array of one-hot encoded sequences.
