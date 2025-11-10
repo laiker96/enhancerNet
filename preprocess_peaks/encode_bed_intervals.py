@@ -23,37 +23,51 @@ def get_sequences(bed_file_name: str, fasta_file: str) -> str:
 
 def one_hot_encoding(sequence: str) -> np.ndarray:
     """
-    Encode a DNA sequence to a one-hot encoded matrix.
-
-    Parameters:
-        - sequence (str): DNA sequence to be encoded.
-
-    Returns:
-        np.ndarray: One-hot encoded matrix of shape (4 x seq_length).
-        N's are treated as a uniform distribution (0.25 in all 4 channels that sum to 1).
+    Encode a DNA sequence into a 4×L one-hot matrix.
+    'A', 'C', 'G', 'T' → one-hot channels
+    'N' or unknown → uniform [0.25, 0.25, 0.25, 0.25]
     """
-        
-    mapping = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
-    encoding = np.zeros((4, len(sequence)), dtype = np.float32)
-    sequence_upper = sequence.upper()
-        
-    for i, base in enumerate(sequence_upper):
-        if base in mapping:
-            encoding[mapping[base], i] = 1.0
-        elif base == 'N':
-            encoding[:, i] = 0.25 
-    return encoding.reshape(1, 4, -1)
+    # Preallocate output: (4 × L)
+    seq_len = len(sequence)
+    encoding = np.zeros((4, seq_len), dtype=np.float32)
+
+    # Fastest possible uppercase ASCII conversion
+    # (no Python loop, works directly on bytes)
+    seq_bytes = np.frombuffer(sequence.encode("ascii"), dtype=np.uint8)
+    seq_upper = np.where((seq_bytes >= 97) & (seq_bytes <= 122),  # a-z → A-Z
+                         seq_bytes - 32, seq_bytes)
+
+    # Lookup table for ASCII → channel index (A,C,G,T = 0–3, others = 4)
+    lut = np.full(128, 4, dtype=np.uint8)
+    lut[ord('A')] = 0
+    lut[ord('C')] = 1
+    lut[ord('G')] = 2
+    lut[ord('T')] = 3
+
+    # Vectorized map to indices (0–4)
+    indices = lut[seq_upper]
+
+    # Boolean mask for valid bases
+    valid_mask = indices < 4
+    valid_positions = np.nonzero(valid_mask)[0]
+
+    # Efficient scatter using advanced indexing
+    encoding[indices[valid_mask], valid_positions] = 1.0
+
+    # Assign 0.25 for 'N' and unknown bases (indices == 4)
+    if np.any(~valid_mask):
+        encoding[:, ~valid_mask] = 0.25
+
+    return encoding
 
 def process_fasta(filename: str) -> None:
     """
     Process a multi-FASTA file into a numpy array of one-hot encoded sequences.
 
-    Parameters:
-    - filename (str): Path to the input multi-FASTA file.
-
-    Returns:
-    - None
+    Each sequence becomes shape (1, L, 4), so appending produces (N, L, 4).
     """
+    import os
+    from npy_append_array import NpyAppendArray
 
     file_basename = os.path.splitext(filename)[0]                                             
     output_name = file_basename + '_encoding.npy'
@@ -65,11 +79,13 @@ def process_fasta(filename: str) -> None:
         for line in lines:
             if line.startswith('>'):
                 continue
-            else:
-                sequence = np.array([line.strip()])
-                output.append(sequence)
-                
 
+            sequence = one_hot_encoding(line.strip())  
+            sequence = np.expand_dims(sequence, axis=0)  
+
+            output.append(sequence)
+
+                
 
 def main(bed_file_name: str, genome_file: str) -> None:
     """

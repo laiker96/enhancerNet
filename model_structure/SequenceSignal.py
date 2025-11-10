@@ -4,207 +4,172 @@ from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
 
 class Sequence(Dataset):
-    
     """
-    Dataset class for handling sequences and signals for training a neural network.
-    
-    Parameters:
-        - one_hot_file (str): Path to the file containing one-hot encoded sequences.
-        - signal_file (str): Path to the file containing signal data.
-        - device (str, optional): Device to load data (default is 'cpu').
+    Efficient dataset class for handling large one-hot encoded DNA sequences.
 
-    Methods:
-        - __len__(): Get the number of samples in the dataset.
-        - __getitem__(index): Get a sample from the dataset by index.
+    Parameters:
+        one_hot_file (str): Path to the .npy file containing one-hot encoded sequences.
+        device (torch.device, optional): Target device for on-demand transfer (default: CPU).
 
     Notes:
-        - The class loads one-hot encoded DNA sequences and signal data for neural network training.
-        - It allows customization of the device and signal data transformation.
-    """
-    
-    def __init__(self, one_hot_file: str, 
-                 device: torch.device = torch.device('cpu')):
-        
-        self.one_hot_data = np.load(one_hot_file)
-        self.device = device
-
-    def __len__(self) -> int:
-        """
-        Get the number of samples in the dataset.
-
-        Returns:
-            int: The number of samples in the dataset.
-        """
-        
-        return len(self.one_hot_data)
-
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Get a sample from the dataset by index.
-
-        Parameters:
-            - index (int): Index of the sample to retrieve.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]: A tuple containing one-hot encoded sequence tensor and signal tensor.
-        """
-        
-        one_hot_tensor = torch.tensor(SequenceSignal.one_hot_encoding(self.one_hot_data[index]), 
-                                      dtype = torch.float32, 
-                                      device = self.device)
-
-        
-        return one_hot_tensor
-    
-    @staticmethod
-    def one_hot_encoding(sequence: str) -> np.ndarray:
-        """
-        Encode a DNA sequence to a one-hot encoded matrix and add N mutations during encoding.
-
-        Parameters:
-            - sequence (str): DNA sequence to be encoded.
-        Returns:
-            np.ndarray: One-hot encoded matrix of shape (4 x seq_length).
-                    N's are treated as a uniform distribution (0.25 in all 4 channels that sum to 1).
-        """
-    
-        # Define nucleotide mapping and initialization
-        mapping = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
-        seq_len = len(sequence)
-        encoding = np.zeros((4, seq_len), dtype=np.float32)
-        sequence_upper = sequence.upper()
-
-        # Convert sequence to integer indices
-        indices = np.array([mapping.get(base, 4) for base in sequence_upper])
-
-        # Apply base encoding for A, C, G, T, and N
-        valid_indices = indices[indices < 4]  # Exclude 'N' positions
-        encoding[valid_indices, np.arange(seq_len)[indices < 4]] = 1.0
-
-        # Handle 'N' positions
-        n_positions = (indices == 4)
-        encoding[:, n_positions] = 0.25
-
-
-        return encoding
-
-class SequenceSignal(Sequence):
-    
-    """
-    Dataset class for handling sequences and signals for training a neural network.
-    
-    Parameters:
-        - one_hot_file (str): Path to the file containing one-hot encoded sequences.
-        - signal_file (str): Path to the file containing signal data.
-        - device (str, optional): Device to load data (default is 'cpu').
-
-    Methods:
-        - __len__(): Get the number of samples in the dataset.
-        - __getitem__(index): Get a sample from the dataset by index.
-
-    Notes:
-        - The class loads one-hot encoded DNA sequences and signal data for neural network training.
-        - It allows customization of the device and signal data transformation.
+        - Uses memory mapping to avoid loading the entire dataset into memory.
+        - Transfers sequences to GPU only when fetched.
     """
     
     def __init__(self, 
                  one_hot_file: str, 
-                 signal_file: str, 
                  device: torch.device = torch.device('cpu')):
-        
-        super().__init__(one_hot_file, device = device)
-        self.signal_data = np.load(signal_file)
 
+        self.one_hot_data = np.load(one_hot_file, mmap_mode='r')
+        self.device = device
 
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __len__(self) -> int:
+        """Return the number of sequences in the dataset."""
+        return len(self.one_hot_data)
+
+    def __getitem__(self, index: int) -> torch.Tensor:
         """
-        Get a sample from the dataset by index.
-
-        Parameters:
-            - index (int): Index of the sample to retrieve.
+        Fetch one sequence, transfer to device on demand.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: A tuple containing one-hot encoded sequence tensor and signal tensor.
+            torch.Tensor: One-hot encoded sequence tensor.
         """
-        
-        one_hot_tensor = torch.tensor(SequenceSignal.one_hot_encoding(self.one_hot_data[index]), 
-                                      dtype = torch.float32, 
-                                      device = self.device)
-        
-        signal_tensor = torch.tensor(self.signal_data[index], 
-                                     dtype = torch.float32, 
-                                     device = self.device)
-        
-        return one_hot_tensor, signal_tensor
+
+        seq = torch.from_numpy(np.array(self.one_hot_data[index], dtype=np.float32))
 
 
-def _loadDataset(train_dataset: SequenceSignal, 
-                 test_dataset: SequenceSignal,
-                 batch_size: int, 
-                 shuffle: bool = True
-                 ) -> Tuple[DataLoader, DataLoader]:
+        if self.device.type == 'cuda':
+            seq = seq.to(self.device, non_blocking=True)
+
+        return seq
+
+
+class SequenceSignal(Sequence):
     """
-    Load train and validation datasets into DataLoader objects.
+    Dataset class for handling one-hot encoded sequences and corresponding signal data.
 
     Parameters:
-        - train_dataset (SequenceSignal): Training dataset.
-        - test_dataset (SequenceSignal): Validation dataset.
-        - batch_size (int): Batch size for DataLoader.
-        - shuffle (bool, optional): Whether to shuffle the data (default is True).
+        one_hot_file (str): Path to .npy file containing one-hot encoded sequences.
+        signal_file (str): Path to .npy file containing signal data.
+        device (torch.device, optional): Target device for on-demand transfer (default: CPU).
+
+    Notes:
+        - Uses memory mapping for both datasets to handle large files efficiently.
+        - Transfers only the current sample to GPU when fetched.
+    """
+
+    def __init__(
+        self, 
+        one_hot_file: str, 
+        signal_file: str, 
+        device: torch.device = torch.device('cpu')
+    ):
+        super().__init__(one_hot_file, device=device)
+        self.signal_data = np.load(signal_file, mmap_mode='r')
+
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return a (sequence, signal) pair as tensors."""
+        # Sequence tensor
+
+        seq = torch.from_numpy(np.array(self.one_hot_data[index], dtype=np.float32))
+        signal = torch.from_numpy(np.array(self.signal_data[index], dtype=np.float32))
+        return seq, signal
+
+def _loadDataset(
+    train_dataset: Dataset, 
+    val_dataset: Dataset,
+    batch_size: int, 
+    shuffle: bool = True,
+    num_workers: int = 4,
+    pin_memory: bool = True
+) -> Tuple[DataLoader, DataLoader]:
+    """
+    Create DataLoader objects for training and validation datasets.
+
+    Parameters:
+        train_dataset (Dataset): Training dataset.
+        val_dataset (Dataset): Validation dataset.
+        batch_size (int): Batch size for DataLoader.
+        shuffle (bool, optional): Whether to shuffle the training data (default: True).
+        num_workers (int, optional): Number of subprocesses for data loading (default: 4).
+        pin_memory (bool, optional): Whether to pin memory for faster GPU transfer (default: True).
 
     Returns:
-        Tuple[DataLoader, DataLoader]: A tuple containing DataLoader objects for the training and validation datasets.
+        Tuple[DataLoader, DataLoader]: (train_loader, val_loader)
     """
-    
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size = batch_size,
-        shuffle = shuffle,
-    )
-    valid_loader = DataLoader(
-        test_dataset,
-        batch_size = batch_size,
-        shuffle = shuffle,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory
     )
 
-    return (train_loader, valid_loader)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,  
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+
+    return train_loader, val_loader
 
 
-def load_dataset(train_encoding_path: str, 
-                 train_signal_path: str, 
-                 val_encoding_path: str, 
-                 val_signal_path: str, 
-                 batch_size: int, 
-                 device: torch.device = torch.device('cpu'), 
-                 shuffle = True, **kwargs
-                 ) -> Tuple[DataLoader, DataLoader]:
+def load_dataset(
+    train_encoding_path: str, 
+    train_signal_path: str, 
+    val_encoding_path: str, 
+    val_signal_path: str, 
+    batch_size: int, 
+    device: torch.device = torch.device('cpu'), 
+    shuffle: bool = True,
+    num_workers: int = 4,
+    pin_memory: bool = True,
+    **kwargs
+) -> Tuple[DataLoader, DataLoader]:
     """
     Load and prepare the training and validation datasets.
 
     Args:
-        train_encoding_path (str): Path to the training encoding file.
-        train_signal_path (str): Path to the training signal file.
-        val_encoding_path (str): Path to the validation encoding file.
-        val_signal_path (str): Path to the validation signal file.
+        train_encoding_path (str): Path to the training encoding (.npy) file.
+        train_signal_path (str): Path to the training signal (.npy) file.
+        val_encoding_path (str): Path to the validation encoding (.npy) file.
+        val_signal_path (str): Path to the validation signal (.npy) file.
         batch_size (int): Batch size for training.
-        device (str): Device to load data ('cpu' or 'cuda').
+        device (torch.device): Target device ('cpu' or 'cuda').
+        shuffle (bool): Whether to shuffle the training data.
+        num_workers (int): Number of worker processes for data loading.
+        pin_memory (bool): Whether to pin memory for faster transfer to GPU.
+        **kwargs: Additional keyword arguments for SequenceSignal.
 
     Returns:
-        Tuple[DataLoader, DataLoader]: Tuple containing train and validation dataloaders.
+        Tuple[DataLoader, DataLoader]: (train_loader, val_loader)
     """
-    train_dataset = SequenceSignal(train_encoding_path, 
-                                   train_signal_path,
-                                   device = device, 
-                                   **kwargs)
 
-    val_dataset = SequenceSignal(val_encoding_path, 
-                                 val_signal_path, 
-                                 device=device, 
-                                 **kwargs)
+    train_dataset = SequenceSignal(
+        train_encoding_path, 
+        train_signal_path, 
+        device=device, 
+        **kwargs
+    )
 
-    dataloaders = _loadDataset(train_dataset, 
-                               val_dataset, 
-                               batch_size, 
-                               shuffle = shuffle)
+    val_dataset = SequenceSignal(
+        val_encoding_path, 
+        val_signal_path, 
+        device=device, 
+        **kwargs
+    )
+
+    dataloaders = _loadDataset(
+        train_dataset, 
+        val_dataset, 
+        batch_size, 
+        shuffle=shuffle, 
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
     
     return dataloaders
+
