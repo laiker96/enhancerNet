@@ -60,15 +60,11 @@ def main():
         input_size=4,
         n_encoder_layers=2,
         n_heads=8,
-        n_transformer_FC_layers=256).to(device)
-
-    # --- Optionally compile model (PyTorch 2.0+) ---
-    if args.compile:
-        print("Compiling model with torch.compile() for optimized performance...")
-        model = torch.compile(model)  # speeds up training in PyTorch 2.x
+        n_transformer_FC_layers=256
+    ).to(device)
 
     # --- Optimizer & scheduler ---
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=5e-3)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=9e-3)
     lr_scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer,
         epochs=args.n_epochs,
@@ -83,26 +79,38 @@ def main():
     means_path = Path(args.z_mean) if args.z_mean else None
     stds_path = Path(args.z_std) if args.z_std else None
 
-    # --- Checkpoint loading ---
+    # --- Load checkpoint BEFORE compiling ---
     checkpoint_path = Path(args.checkpoint_path)
+    best_valid_loss = float('inf')
+
     if checkpoint_path.exists():
+        print(f"🔄 Loading checkpoint from {checkpoint_path}")
         training_state = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(training_state["network"])
+
+        # Load safely (ignore missing lr_sched if absent)
+        model.load_state_dict(training_state["network"], strict=False)
         optimizer.load_state_dict(training_state["optimizer"])
-        lr_scheduler.load_state_dict(training_state["lr_sched"])
-        best_valid_loss = training_state.get("best_valid_loss", None)
-        print(f"Resumed training. Best validation loss so far: {best_valid_loss}")
+        if "lr_sched" in training_state:
+            lr_scheduler.load_state_dict(training_state["lr_sched"])
+        best_valid_loss = training_state.get("best_valid_loss", best_valid_loss)
+        print(f"Resumed training. Best validation loss so far: {best_valid_loss:.6f}")
+
+    # --- Compile AFTER weights are loaded ---
+    if args.compile:
+        print("Compiling model with torch.compile() for optimized performance...")
+        model = torch.compile(model)
 
     # --- Train ---
     train_val_loops.train_N_epochs(
-        model,
-        optimizer,
+        network=model,
+        optimizer=optimizer,
         criterion=criterion,
         train_loader=dataloaders[0],
         valid_loader=dataloaders[1],
         num_epochs=args.n_epochs,
         patience=args.patience,
         model_path=checkpoint_path,
+        best_valid_loss=best_valid_loss,
         lr_scheduler=lr_scheduler,
         means_path=means_path,
         stds_path=stds_path,

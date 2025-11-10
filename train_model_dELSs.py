@@ -1,21 +1,25 @@
 #!/usr/bin/env python
+"""
+Fine-tune a pretrained TransformerCNNMixtureModel for CRE enhancer classification.
+Supports optional mixed precision, model compilation (PyTorch 2.x), and checkpointing.
+"""
+
 import math
 import numpy as np
 from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from model_structure import (SequenceSignal, 
-                             transformer_model, 
-                             train_val_loops)
+from model_structure import SequenceSignal, transformer_model, train_val_loops
+
 
 def parse_args():
     import argparse
-    parser = argparse.ArgumentParser(description="Train CNN+Transformer for CRE enhancer classification")
-    parser.add_argument("--x_train", type=str, required=True, help="Training features (npy)")
-    parser.add_argument("--y_train", type=str, required=True, help="Training labels (npy)")
-    parser.add_argument("--x_val", type=str, required=True, help="Validation features (npy)")
-    parser.add_argument("--y_val", type=str, required=True, help="Validation labels (npy)")
+    parser = argparse.ArgumentParser(description="Fine-tune CNN+Transformer for CRE enhancer classification")
+    parser.add_argument("--x_train", type=str, required=True, help="Training features (.npy)")
+    parser.add_argument("--y_train", type=str, required=True, help="Training labels (.npy)")
+    parser.add_argument("--x_val", type=str, required=True, help="Validation features (.npy)")
+    parser.add_argument("--y_val", type=str, required=True, help="Validation labels (.npy)")
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--n_epochs", type=int, default=30)
     parser.add_argument("--patience", type=int, default=20)
@@ -25,13 +29,15 @@ def parse_args():
     parser.add_argument("--pretrained_weights", type=str, default=None, help="Optional pretrained weights path")
     parser.add_argument("--use_amp", action="store_true", help="Enable mixed-precision training")
     parser.add_argument("--max_lr", type=float, default=2e-3)
+    parser.add_argument("--compile", action="store_true", help="Compile model with torch.compile() for speed (PyTorch 2.x)")
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    # Load datasets
+    # --- Load datasets ---
     N_TRAIN = np.load(args.y_train).shape[0]
     dataloaders = SequenceSignal.load_dataset(
         Path(args.x_train),
@@ -42,26 +48,25 @@ def main():
         device=device
     )
 
-    # Model
+    # --- Model definition ---
     model = transformer_model.TransformerCNNMixtureModel(
         n_conv_layers=4,
         n_filters=[256, 60, 60, 120],
-        kernel_sizes=[7,3,5,3],
-        dilation=[1,1,1,1],
+        kernel_sizes=[7, 3, 5, 3],
+        dilation=[1, 1, 1, 1],
         drop_conv=0.1,
         n_fc_layers=2,
         drop_fc=0.4,
-        n_neurons=[256,256],
+        n_neurons=[256, 256],
         output_size=args.output_shape,
         drop_transformer=0.2,
         input_size=4,
         n_encoder_layers=2,
         n_heads=8,
         n_transformer_FC_layers=256
-    )
-    model.to(device)
+    ).to(device)
 
-    # Optimizer & Scheduler
+    # --- Optimizer & Scheduler ---
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=5e-3)
     lr_scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -72,46 +77,56 @@ def main():
         anneal_strategy="linear"
     )
 
-    # BCE Loss
+    # --- BCE loss with optional class balancing ---
     epsilon = 1e-6
     y_train_array = np.load(args.y_train)
     n_pos = y_train_array.sum(axis=0)
     n_neg = (1.0 - y_train_array).sum(axis=0)
     pos_weight = torch.log1p(torch.tensor(n_neg / (n_pos + epsilon))).to(device)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=None)  # Enable pos_weight if needed
+    criterion = nn.BCEWithLogitsLoss(pos_weight=None)  # adjust to pos_weight if imbalance is large
 
     checkpoint_path = Path(args.checkpoint_path)
+    best_valid_loss = float("inf")
 
-    # Pretrained weights
+    # --- Load pretrained weights (for transfer learning) ---
     if args.pretrained_weights:
         print(f"Loading pretrained weights from {args.pretrained_weights}")
-        state = torch.load(args.pretrained_weights, weights_only=True, map_location=device)
-        model.load_state_dict(state['network'])
+        state = torch.load(args.pretrained_weights, map_location=device)
+        model.load_state_dict(state["network"], strict=False)
+        print("Pretrained weights loaded successfully.")
 
-    # Resume from checkpoint if exists
+    # --- Resume from existing fine-tuning checkpoint ---
     if checkpoint_path.exists():
         print(f"Resuming from checkpoint {checkpoint_path}")
-        state = torch.load(checkpoint_path, weights_only=True, map_location=device)
-        model.load_state_dict(state['network'])
-        optimizer.load_state_dict(state['optimizer'])
-        lr_scheduler.load_state_dict(state['lr_sched'])
-        best_valid_loss = state.get('best_valid_loss', None)
-        print(f"Resumed training. Best validation loss so far: {best_valid_loss}")
+        state = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(state["network"], strict=False)
+        optimizer.load_state_dict(state["optimizer"])
+        if "lr_sched" in state:
+            lr_scheduler.load_state_dict(state["lr_sched"])
+        best_valid_loss = state.get("best_valid_loss", best_valid_loss)
+        print(f"Resumed training. Best validation loss so far: {best_valid_loss:.6f}")
 
-    # Start/continue training
+    # --- Compile AFTER loading weights/checkpoint ---
+    if args.compile:
+        print("🚀 Compiling model with torch.compile() for optimized performance...")
+        model = torch.compile(model)
+
+    # --- Train ---
     train_val_loops.train_N_epochs(
-        model,
-        optimizer,
+        network=model,
+        optimizer=optimizer,
         criterion=criterion,
         train_loader=dataloaders[0],
         valid_loader=dataloaders[1],
         num_epochs=args.n_epochs,
         patience=args.patience,
         model_path=checkpoint_path,
+        best_valid_loss=best_valid_loss,
         lr_scheduler=lr_scheduler,
         DEVICE=device,
         use_amp=args.use_amp
     )
+
 
 if __name__ == "__main__":
     main()
