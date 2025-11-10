@@ -56,11 +56,9 @@ def main():
         drop_fc=0.4,
         n_neurons=[256, 256],
         output_size=args.output_shape,
-        drop_transformer=0.3,
-        #drop_transformer=0.2,
+        drop_transformer=0.2,
         input_size=4,
-        #n_encoder_layers=2,
-        n_encoder_layers=3,
+        n_encoder_layers=2,
         n_heads=8,
         n_transformer_FC_layers=256).to(device)
 

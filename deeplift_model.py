@@ -3,48 +3,6 @@ import numpy as np
 from captum.attr import DeepLift
 from tqdm import tqdm
 
-def one_hot_encoding(sequence: str, num_mutations: int = 0) -> np.ndarray:
-    """
-    Encode a DNA sequence to a one-hot encoded matrix and add N mutations during encoding.
-
-    Parameters:
-        - sequence (str): DNA sequence to be encoded.
-        - num_mutations (int): Number of random mutations to introduce.
-
-    Returns:
-        np.ndarray: One-hot encoded matrix of shape (4 x seq_length).
-                N's are treated as a uniform distribution (0.25 in all 4 channels that sum to 1).
-    """
-
-    # Define nucleotide mapping and initialization
-    mapping = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
-    seq_len = len(sequence)
-    encoding = np.zeros((4, seq_len), dtype=np.float32)
-    sequence_upper = sequence.upper()
-
-    # Convert sequence to integer indices
-    indices = np.array([mapping.get(base, 4) for base in sequence_upper])
-
-    # Apply base encoding for A, C, G, T, and N
-    valid_indices = indices[indices < 4]  # Exclude 'N' positions
-    encoding[valid_indices, np.arange(seq_len)[indices < 4]] = 1.0
-
-    # Handle 'N' positions
-    n_positions = (indices == 4)
-    encoding[:, n_positions] = 0.25
-
-    # Mutation Handling
-    if num_mutations > 0:
-        # Choose mutation positions and mutation types
-        mutation_positions = np.random.choice(seq_len, size=num_mutations, replace=False)
-        mutation_types = np.random.choice(4, size=num_mutations)
-
-        # Apply mutations
-        encoding[:, mutation_positions] = 0  # Reset positions to zero
-        encoding[mutation_types, mutation_positions] = 1.0  # Apply mutations
-
-    return encoding
-
 def dinucleotide_shuffle(one_hot_sequence):
     """
     Shuffles dinucleotides in a one-hot encoded sequence.
