@@ -24,7 +24,11 @@ def parse_args():
     parser.add_argument("--checkpoint_path", type=str, default="ATAC_transformer.pth")
     parser.add_argument("--z_mean", type=str, default=None, help="Optional path to Z-score means (npy)")
     parser.add_argument("--z_std", type=str, default=None, help="Optional path to Z-score stds (npy)")
-    parser.add_argument("--max_lr", type=float, default=2e-3)
+    parser.add_argument("--max_lr", type=float, default=2e-3, help="Max LR for scheduler")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Fixed learning rate if scheduler is not used")
+    parser.add_argument("--weight_decay", type=float, default=5e-3, help="Weight decay for optimizer")
+    parser.add_argument("--optimizer", type=str, choices=["sgd", "adam", "adamw"], default="adamw")
+    parser.add_argument("--use_scheduler", action="store_true", help="Use OneCycleLR scheduler")
     parser.add_argument("--use_amp", action="store_true", help="Enable mixed-precision training")
     parser.add_argument("--compile", action="store_true", help="Compile model with torch.compile() for performance")
     return parser.parse_args()
@@ -63,37 +67,66 @@ def main():
         n_transformer_FC_layers=256
     ).to(device)
 
-    # --- Optimizer & scheduler ---
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=9e-3)
-    lr_scheduler = optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        epochs=args.n_epochs,
-        max_lr=args.max_lr,
-        steps_per_epoch=math.ceil(N_TRAIN_EXAMPLES / args.batch_size),
-        pct_start=0.15,
-        anneal_strategy="linear"
-    )
+    # --- Optimizer selection ---
+    if args.optimizer.lower() == "sgd":
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
+    elif args.optimizer.lower() == "adam":
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    else:  # adamw
+        optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    # --- Scheduler ---
+    lr_scheduler = None
+    if args.use_scheduler:
+        lr_scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            epochs=args.n_epochs,
+            max_lr=args.max_lr,
+            steps_per_epoch=math.ceil(N_TRAIN_EXAMPLES / args.batch_size),
+            pct_start=0.15,
+            anneal_strategy="linear"
+        )
+
+    # --- Loss ---
     criterion = nn.MSELoss()
 
     # --- Optional normalization paths ---
     means_path = Path(args.z_mean) if args.z_mean else None
     stds_path = Path(args.z_std) if args.z_std else None
 
-    # --- Load checkpoint BEFORE compiling ---
+    # --- Resume training if checkpoint exists ---
     checkpoint_path = Path(args.checkpoint_path)
     best_valid_loss = float('inf')
 
     if checkpoint_path.exists():
-        print(f"🔄 Loading checkpoint from {checkpoint_path}")
-        training_state = torch.load(checkpoint_path, map_location=device)
+        print(f"Resuming from checkpoint {checkpoint_path}")
+        state = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(state["network"], strict=False)
 
-        # Load safely (ignore missing lr_sched if absent)
-        model.load_state_dict(training_state["network"], strict=False)
-        optimizer.load_state_dict(training_state["optimizer"])
-        if "lr_sched" in training_state:
-            lr_scheduler.load_state_dict(training_state["lr_sched"])
-        best_valid_loss = training_state.get("best_valid_loss", best_valid_loss)
+        # --- Check optimizer type before loading ---
+        old_opt_state = state.get("optimizer", None)
+        if old_opt_state is not None:
+            saved_opt_type = state.get("optimizer_type", None)
+            current_opt_type = optimizer.__class__.__name__
+            if saved_opt_type == current_opt_type:
+                optimizer.load_state_dict(old_opt_state)
+                print(f"✅ Optimizer ({current_opt_type}) state restored from checkpoint.")
+            else:
+                print(f"⚠️ Optimizer type mismatch: checkpoint has {saved_opt_type}, current is {current_opt_type}. Reinitializing optimizer.")
+        else:
+            print("ℹ️ No optimizer state found in checkpoint, starting fresh.")
+
+        # --- Scheduler restore (only if compatible) ---
+        if "lr_sched" in state and lr_scheduler is not None:
+            try:
+                lr_scheduler.load_state_dict(state["lr_sched"])
+                print("✅ Scheduler state restored.")
+            except Exception as e:
+                print(f"⚠️ Scheduler could not be restored, restarting schedule.\n{e}")
+
+        best_valid_loss = state.get("best_valid_loss", best_valid_loss)
         print(f"Resumed training. Best validation loss so far: {best_valid_loss:.6f}")
+
 
     # --- Compile AFTER weights are loaded ---
     if args.compile:
