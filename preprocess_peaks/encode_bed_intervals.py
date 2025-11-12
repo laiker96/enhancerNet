@@ -66,9 +66,6 @@ def process_fasta(filename: str) -> None:
 
     Each sequence becomes shape (1, L, 4), so appending produces (N, L, 4).
     """
-    import os
-    from npy_append_array import NpyAppendArray
-
     file_basename = os.path.splitext(filename)[0]                                             
     output_name = file_basename + '_encoding.npy'
 
