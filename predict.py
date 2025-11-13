@@ -2,8 +2,7 @@
 import argparse
 import numpy as np
 import torch
-from pathlib import Path
-from optimization import transformer_model
+from model_structure import transformer_model, SequenceSignal
 
 def main():
     parser = argparse.ArgumentParser(description="Predict enhancer scores with trained CNN+Transformer model")
@@ -15,15 +14,13 @@ def main():
     args = parser.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    X = np.load(args.input_npy)
-    X_tensor = torch.tensor(X, dtype=torch.float32)
 
     # Create dataloader
-    dataset = torch.utils.data.TensorDataset(X_tensor)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    dataset = SequenceSignal.Sequence(args.input_npy)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, 
+                                             shuffle=False, num_workers=4)
 
     # Load model
-    output_shape = X_tensor.shape[-1]  # optional; depends on training
     model = transformer_model.TransformerCNNMixtureModel(
         n_conv_layers=4,
         n_filters=[256, 60, 60, 120],
@@ -33,7 +30,7 @@ def main():
         n_fc_layers=2,
         drop_fc=0.4,
         n_neurons=[256,256],
-        output_size=None,  # will infer from checkpoint
+        output_size=9,
         drop_transformer=0.2,
         input_size=4,
         n_encoder_layers=2,
