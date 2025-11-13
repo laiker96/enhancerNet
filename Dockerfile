@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY model_structure/ /app/model_structure/
 COPY model_weights/ /app/model_weights/
-COPY pretrain_model_with_ATAC.py train_model_dELSs.py encode_fasta.py predict.py run_prediction.py /app/
+COPY pretrain_model_with_ATAC.py fine_tune_model.py predict.py /app/
 
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser

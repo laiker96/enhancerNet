@@ -91,68 +91,6 @@ def dinucleotide_shuffle(one_hot_sequence: np.ndarray) -> np.ndarray:
     return one_hot_encoding(shuffled_seq)
 
 
-# =========================================================
-# ⚡ SINGLE-TASK DEEPLIFT ATTRIBUTION
-# =========================================================
-def compute_deeplift_attributions2(
-    model,
-    input_seqs,
-    dinucleotide_shuffle_fn,
-    target_class=0,
-    num_baselines=10,
-    cleanup_interval=50,
-    device="cuda"
-):
-    """
-    Compute DeepLIFT attributions for a single model output (target_class)
-    using multiple dinucleotide-shuffled baselines.
-
-    Args:
-        model: PyTorch model
-        input_seqs: tensor (N, C, L)
-        dinucleotide_shuffle_fn: function generating shuffled baselines
-        target_class: output index to attribute
-        num_baselines: number of shuffles
-        cleanup_interval: cleanup frequency
-        device: 'cuda' or 'cpu'
-
-    Returns:
-        Tensor (N, C, L): averaged attributions
-    """
-    model.eval()
-    deeplift = DeepLift(model)
-    N, C, L = input_seqs.shape
-
-    all_attributions = torch.zeros_like(input_seqs, device="cpu")
-
-    for i, input_seq in enumerate(tqdm(input_seqs, desc="DeepLIFT single-task")):
-        input_seq = input_seq.unsqueeze(0).to(device)
-        seq_np = input_seq[0].detach().cpu().numpy()
-
-        # Generate baselines
-        shuffled_list = [
-            torch.tensor(dinucleotide_shuffle_fn(seq_np), dtype=torch.float32)
-            for _ in range(num_baselines)
-        ]
-        baselines = torch.stack(shuffled_list).to(device)
-        inputs_repeated = input_seq.repeat(num_baselines, 1, 1)
-
-        # Compute DeepLIFT
-        attributions = deeplift.attribute(inputs_repeated, baselines, target=target_class)
-        attributions_avg = attributions.mean(dim=0, keepdim=True)
-
-        all_attributions[i] = attributions_avg.squeeze(0).detach().cpu()
-
-        # Cleanup
-        del input_seq, baselines, inputs_repeated, attributions, attributions_avg
-        if (i + 1) % cleanup_interval == 0 or i == N - 1:
-            torch.cuda.empty_cache()
-
-    print("Shape of averaged attributions:", all_attributions.shape)
-    return all_attributions
-
-
-# =========================================================
 # 🌐 MULTI-TASK / PLEIOTROPIC DEEPLIFT (Module-Safe)
 # =========================================================
 def compute_pleiotropic_attributions(
@@ -169,25 +107,8 @@ def compute_pleiotropic_attributions(
     """
     Compute attributions averaged across active tasks (mask=1),
     using either DeepLIFT or Integrated Gradients.
-
-    Args:
-        model: multi-output PyTorch model (outputs: batch×T)
-        input_seqs: (N, 4, L) tensor
-        activity_mask: (N, T) binary mask (1=active, 0=inactive)
-        dinucleotide_shuffle_fn: function to generate baseline sequences
-        method: 'deeplift' or 'integrated_gradients'
-        num_baselines: number of dinuc-shuffled baselines
-        cleanup_interval: how often to clear GPU cache
-        ig_steps: number of steps for Integrated Gradients
-        device: 'cuda' or 'cpu'
-
-    Returns:
-        Tensor (N, 4, L): pleiotropic attributions
     """
 
-    # -------------------------------
-    # Initialize
-    # -------------------------------
     model.eval()
     activity_mask = torch.as_tensor(activity_mask, dtype=torch.float32, device=device)
     N, C, L = input_seqs.shape
@@ -198,14 +119,10 @@ def compute_pleiotropic_attributions(
         seq_np = input_seq[0].detach().cpu().numpy()
         task_mask = activity_mask[i]
 
-        # Skip inactive examples
         if task_mask.sum() == 0:
             all_attributions[i] = 0.0
             continue
 
-        # -------------------------------
-        # Wrap model for masked mean output
-        # -------------------------------
         class MaskedMeanWrapper(nn.Module):
             def __init__(self, base_model, mask):
                 super().__init__()
@@ -213,16 +130,13 @@ def compute_pleiotropic_attributions(
                 self.register_buffer("mask", mask)
 
             def forward(self, x):
-                y = self.base_model(x)  # shape: (batch, T)
+                y = self.base_model(x)
                 weighted = y * self.mask
                 mean_output = weighted.sum(dim=1, keepdim=True) / self.mask.sum()
-                return mean_output  # shape: (batch, 1)
+                return mean_output
 
         wrapped_model = MaskedMeanWrapper(model, task_mask)
 
-        # -------------------------------
-        # Initialize attribution method
-        # -------------------------------
         if method.lower() == "deeplift":
             explainer = DeepLift(wrapped_model)
         elif method.lower() in ["ig", "integrated_gradients"]:
@@ -230,9 +144,6 @@ def compute_pleiotropic_attributions(
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'deeplift' or 'integrated_gradients'.")
 
-        # -------------------------------
-        # Generate baselines
-        # -------------------------------
         shuffled_list = [
             torch.tensor(dinucleotide_shuffle_fn(seq_np), dtype=torch.float32)
             for _ in range(num_baselines)
@@ -240,33 +151,114 @@ def compute_pleiotropic_attributions(
         baselines = torch.stack(shuffled_list).to(device)
         inputs_repeated = input_seq.repeat(num_baselines, 1, 1)
 
-        # -------------------------------
-        # Compute attributions
-        # -------------------------------
         if method.lower() == "deeplift":
             attributions = explainer.attribute(inputs_repeated, baselines=baselines)
-        else:  # Integrated Gradients
+        else:
             attributions = explainer.attribute(
                 inputs_repeated, baselines=baselines, n_steps=ig_steps
             )
 
-        # -------------------------------
-        # Average across baselines
-        # -------------------------------
         attributions_avg = attributions.mean(dim=0, keepdim=True)
-
-        # Mask with one-hot to keep only the active base at each position
         attributions_avg = attributions_avg * input_seq
-
-        # Store on CPU
         all_attributions[i] = attributions_avg.squeeze(0).detach().cpu()
 
-        # -------------------------------
-        # Cleanup
-        # -------------------------------
         del input_seq, baselines, inputs_repeated, attributions, attributions_avg, explainer, wrapped_model
         if (i + 1) % cleanup_interval == 0 or i == N - 1:
             torch.cuda.empty_cache()
 
     print(f"Shape of {method} pleiotropic attributions:", all_attributions.shape)
     return all_attributions
+
+
+# =========================================================
+# 🚀 MAIN ENTRY POINT
+# =========================================================
+if __name__ == "__main__":
+    import argparse
+    import os
+    import pandas as pd
+    from torch.utils.data import DataLoader
+    from model_structure.SequenceSignal import Sequence
+    from model_structure import transformer_model
+
+    parser = argparse.ArgumentParser(description="Compute DeepLIFT/IG attributions for enhancer models.")
+    parser.add_argument("--model_checkpoint", type=str, required=True)
+    parser.add_argument("--input_seqs", type=str, required=True, help="Path to .npy or .pt sequence file.")
+    parser.add_argument("--activity_mask", type=str, required=True, help="Path to activity mask .txt file.")
+    parser.add_argument("--method", type=str, default="deeplift", choices=["deeplift", "ig", "integrated_gradients"])
+    parser.add_argument("--num_baselines", type=int, default=10)
+    parser.add_argument("--ig_steps", type=int, default=50)
+    parser.add_argument("--batch_size", type=int, default=4096)
+    parser.add_argument("--seq_length", type=int, default=1000)
+    parser.add_argument("--output_prefix", type=str, required=True)
+    args = parser.parse_args()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # --- Load model ---
+    model = transformer_model.TransformerCNNMixtureModel(
+        n_conv_layers=4,
+        n_filters=[256, 60, 60, 120],
+        kernel_sizes=[7, 3, 5, 3],
+        dilation=[1, 1, 1, 1],
+        drop_conv=0.1,
+        n_fc_layers=2,
+        drop_fc=0.4,
+        n_neurons=[256, 256],
+        output_size=9,
+        drop_transformer=0.2,
+        input_size=4,
+        n_encoder_layers=2,
+        n_heads=8,
+        n_transformer_FC_layers=256,
+    ).to(device)
+
+    state = torch.load(args.model_checkpoint, map_location=device, weights_only=True)
+    model.load_state_dict(state["network"])
+    model.eval()
+
+    # --- Load sequences ---
+    dataset = Sequence(args.input_seqs, device=device)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    total = len(dataset)
+    input_seqs = torch.zeros((total, 4, args.seq_length), device=device)
+
+    with torch.inference_mode():
+        for i, batch in enumerate(dataloader):
+            start, end = i * args.batch_size, i * args.batch_size + batch.shape[0]
+            input_seqs[start:end] = batch
+
+    # Save input tensor
+    np.save(f"{args.output_prefix}_input_seqs.npy", input_seqs.cpu().numpy())
+    print(f"Saved input one-hot sequences to {args.output_prefix}_input_seqs.npy")
+
+    # --- Load activity mask ---
+    activity_mask = np.loadtxt(args.activity_mask)
+
+    # --- Compute attributions ---
+    print(f"Computing {args.method.upper()} with {args.num_baselines} baselines...")
+    if args.method.lower() in ["ig", "integrated_gradients"]:
+        attributions = compute_pleiotropic_attributions(
+            model=model,
+            input_seqs=input_seqs,
+            activity_mask=activity_mask,
+            dinucleotide_shuffle_fn=dinucleotide_shuffle,
+            method=args.method,
+            num_baselines=args.num_baselines,
+            ig_steps=args.ig_steps,
+            device=device,
+        )
+    else:
+        attributions = compute_pleiotropic_attributions(
+            model=model,
+            input_seqs=input_seqs,
+            activity_mask=activity_mask,
+            dinucleotide_shuffle_fn=dinucleotide_shuffle,
+            method=args.method,
+            num_baselines=args.num_baselines,
+            device=device,
+        )
+
+    np.save(f"{args.output_prefix}_{args.method}_attributions.npy", attributions.cpu().numpy())
+    print(f"✅ Saved {args.method} attributions to {args.output_prefix}_{args.method}_attributions.npy")
