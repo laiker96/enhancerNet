@@ -97,79 +97,78 @@ def compute_pleiotropic_attributions(
     model,
     input_seqs,
     activity_mask,
-    dinuc_shuffle_fn,
+    dinucleotide_shuffle_fn,
+    method="deeplift",          # "deeplift" or "integrated_gradients"
     num_baselines=10,
     cleanup_interval=50,
+    ig_steps=50,                # only used for IG
     device="cuda"
 ):
     """
-    Returns:
-        hypothetical_contrib: (N, 4, L) -> TF-MoDISco-compatible hypothetical contributions
-        real_base_contrib: (N, 4, L) -> contribution of each channel in the actual input
+    Compute attributions averaged across active tasks (mask=1),
+    using either DeepLIFT or Integrated Gradients.
     """
 
     model.eval()
     activity_mask = torch.as_tensor(activity_mask, dtype=torch.float32, device=device)
     N, C, L = input_seqs.shape
+    all_attributions = torch.zeros((N, C, L), dtype=torch.float32, device="cpu")
 
-    hypothetical_out = torch.zeros((N, C, L), dtype=torch.float32)
-    real_base_out = torch.zeros((N, C, L), dtype=torch.float32)
+    for i, input_seq in enumerate(tqdm(input_seqs, desc=f"Pleiotropic {method.upper()}")):
+        input_seq = input_seq.unsqueeze(0).to(device)
+        seq_np = input_seq[0].detach().cpu().numpy()
+        task_mask = activity_mask[i]
 
-    for i, seq in enumerate(tqdm(input_seqs, desc="DeepLIFT + hypothetical")):
-
-        seq = seq.unsqueeze(0).to(device)   # (1,4,L)
-        seq_np = seq[0].cpu().numpy()
-        mask = activity_mask[i]
-
-        if mask.sum() == 0:
+        if task_mask.sum() == 0:
+            all_attributions[i] = 0.0
             continue
 
-        # Wrap model to average only active tasks
         class MaskedMeanWrapper(nn.Module):
-            def __init__(self, base, mask):
+            def __init__(self, base_model, mask):
                 super().__init__()
-                self.base = base
+                self.base_model = base_model
                 self.register_buffer("mask", mask)
 
             def forward(self, x):
-                y = self.base(x)               # (N, T)
-                y = (y * self.mask).sum(dim=1, keepdim=True)
-                return y / self.mask.sum()
+                y = self.base_model(x)
+                weighted = y * self.mask
+                mean_output = weighted.sum(dim=1, keepdim=True) / self.mask.sum()
+                return mean_output
 
-        wrapped_model = MaskedMeanWrapper(model, mask)
+        wrapped_model = MaskedMeanWrapper(model, task_mask)
 
-        explainer = DeepLift(wrapped_model, multiply_by_inputs=False)
+        if method.lower() == "deeplift":
+            explainer = DeepLift(wrapped_model)
+        elif method.lower() in ["ig", "integrated_gradients"]:
+            explainer = IntegratedGradients(wrapped_model)
+        else:
+            raise ValueError(f"Unknown method '{method}'. Use 'deeplift' or 'integrated_gradients'.")
 
-        # Build baselines
-        baseline_list = [
-            torch.tensor(dinuc_shuffle_fn(seq_np), dtype=torch.float32)
+        shuffled_list = [
+            torch.tensor(dinucleotide_shuffle_fn(seq_np), dtype=torch.float32)
             for _ in range(num_baselines)
         ]
-        baselines = torch.stack(baseline_list).to(device)  # (B,4,L)
-        seq_repeated = seq.repeat(num_baselines, 1, 1)     # (B,4,L)
+        baselines = torch.stack(shuffled_list).to(device)
+        inputs_repeated = input_seq.repeat(num_baselines, 1, 1)
 
-        # Compute multipliers
-        multipliers = explainer.attribute(seq_repeated, baselines=baselines)  # (B,4,L)
-        
-        # Compute per-baseline hypothetical contributions
-        hypothetical_per_baseline = multipliers * (1 - baselines)  # (B,4,L)
-        hypothetical_avg = hypothetical_per_baseline.mean(dim=0)   # (4,L)
+        if method.lower() == "deeplift":
+            attributions = explainer.attribute(inputs_repeated, baselines=baselines)
+        else:
+            attributions = explainer.attribute(
+                inputs_repeated, baselines=baselines, n_steps=ig_steps
+            )
 
-        # Compute real base contribution: multipliers * input
-        # Use multipliers averaged across baselines
-        multipliers_avg = multipliers.mean(dim=0)  # (4,L)
-        real_base = multipliers_avg * seq.squeeze(0)  # (4,L)
+        attributions_avg = attributions.mean(dim=0, keepdim=True)
+        attributions_avg = attributions_avg * input_seq
+        all_attributions[i] = attributions_avg.squeeze(0).detach().cpu()
 
-        # Save
-        hypothetical_out[i] = hypothetical_avg.cpu()
-        real_base_out[i] = real_base.cpu()
-
-        # Cleanup
-        del seq, seq_repeated, baselines, multipliers, hypothetical_per_baseline, multipliers_avg, real_base, wrapped_model
-        if (i + 1) % cleanup_interval == 0:
+        del input_seq, baselines, inputs_repeated, attributions, attributions_avg, explainer, wrapped_model
+        if (i + 1) % cleanup_interval == 0 or i == N - 1:
             torch.cuda.empty_cache()
 
-    return real_base_out, hypothetical_out
+    print(f"Shape of {method} pleiotropic attributions:", all_attributions.shape)
+    return all_attributions
+
 
 # =========================================================
 # 🚀 MAIN ENTRY POINT
@@ -186,7 +185,9 @@ if __name__ == "__main__":
     parser.add_argument("--model_checkpoint", type=str, required=True)
     parser.add_argument("--input_seqs", type=str, required=True, help="Path to .npy or .pt sequence file.")
     parser.add_argument("--activity_mask", type=str, required=True, help="Path to activity mask .txt file.")
+    parser.add_argument("--method", type=str, default="deeplift", choices=["deeplift", "ig", "integrated_gradients"])
     parser.add_argument("--num_baselines", type=int, default=10)
+    parser.add_argument("--ig_steps", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=4096)
     parser.add_argument("--seq_length", type=int, default=1000)
     parser.add_argument("--output_prefix", type=str, required=True)
@@ -236,15 +237,28 @@ if __name__ == "__main__":
     activity_mask = np.loadtxt(args.activity_mask)
 
     # --- Compute attributions ---
-    attributions = compute_pleiotropic_attributions(
-        model=model,
-        input_seqs=input_seqs,
-        activity_mask=activity_mask,
-        dinuc_shuffle_fn=dinucleotide_shuffle,
-        num_baselines=args.num_baselines,
-        device=device,
-    )
+    print(f"Computing {args.method.upper()} with {args.num_baselines} baselines...")
+    if args.method.lower() in ["ig", "integrated_gradients"]:
+        attributions = compute_pleiotropic_attributions(
+            model=model,
+            input_seqs=input_seqs,
+            activity_mask=activity_mask,
+            dinucleotide_shuffle_fn=dinucleotide_shuffle,
+            method=args.method,
+            num_baselines=args.num_baselines,
+            ig_steps=args.ig_steps,
+            device=device,
+        )
+    else:
+        attributions = compute_pleiotropic_attributions(
+            model=model,
+            input_seqs=input_seqs,
+            activity_mask=activity_mask,
+            dinucleotide_shuffle_fn=dinucleotide_shuffle,
+            method=args.method,
+            num_baselines=args.num_baselines,
+            device=device,
+        )
 
-    np.save(f"{args.output_prefix}_attributions.npy", attributions[0].cpu().numpy())
-    np.save(f"{args.output_prefix}_attributions_hypothetical.npy", attributions[1].cpu().numpy())
-    print(f"✅ Saved attributions to {args.output_prefix}_attributions.npy")
+    np.save(f"{args.output_prefix}_{args.method}_attributions.npy", attributions.cpu().numpy())
+    print(f"✅ Saved {args.method} attributions to {args.output_prefix}_{args.method}_attributions.npy")
