@@ -34,8 +34,9 @@ The project uses a **hybrid multi-task model** combining a **convolutional neura
 - The output sequence is reduced using **global average pooling** and **max pooling** to summarize both global and local signals.  
 - The resulting representation passes through a **feed-forward network** (two hidden layers, 256 neurons each, ReLU, dropout 0.4) to produce the final classification across nine contexts.  
 
-The model is trained using a **two-step strategy**: first as a regression model on ATAC-seq data for nine contexts, then fine-tuned as a classification model using annotated enhancer datasets.
+The model is trained using a **two-step strategy**: first as a regression model on ATAC-seq data for nine contexts, then fine-tuned as a classification model using annotated enhancer datasets. The model performance is summarize in the figure:
 
+![Model results](figures/figura_pr_curves.png)
 ---
 
 ## Repository Structure
